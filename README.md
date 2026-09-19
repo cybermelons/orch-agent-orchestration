@@ -24,6 +24,69 @@ Full design: [`DESIGN.md`](DESIGN.md). State-machine audit: `STATES.md`.
 The `/sc` seam workers run through: [`docs/SC-INTERFACE.md`](docs/SC-INTERFACE.md).
 This file is the front door, not a substitute for any of the three.
 
+## How the work moves
+
+Two independent state functions, both pure and both derived from what the forge
+actually reports — never from an agent's claim about itself. Transcribed from
+[`STATES.md`](STATES.md), which is audited against `core.py`.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> CLAIMED: issue claimed
+    CLAIMED --> ACTIVE: commits ahead, no PR
+    ACTIVE --> CHECKING: PR opened
+    CHECKING --> REVIEW: checks green
+    CHECKING --> BLOCKED: checks red
+    BLOCKED --> CHECKING: pushed a fix
+    REVIEW --> LANDED: merged
+    LANDED --> [*]
+```
+
+`work_state(world, repo, n)` resolves first-match-wins:
+
+    PR MERGED               -> LANDED
+    PR OPEN & green         -> REVIEW
+    PR OPEN & red           -> BLOCKED
+    PR OPEN & not green/red -> CHECKING
+    no PR & commits ahead   -> ACTIVE
+    no PR & no commits      -> CLAIMED
+
+Liveness is a separate axis on purpose. `alive(key)` reads the session ledger
+and checks whether the recorded pgid still exists; it never feeds `work_state`.
+State is about the work, liveness is about the actor. An agent dying does not
+move the work backwards, and an agent insisting it is finished does not move it
+forwards.
+
+## Usage
+
+```
+$ spawn.py --help
+usage: echo "<brief>" | spawn.py <role> <scope...> [--fresh]
+
+  spawn.py dashboard-op
+  spawn.py repo-orch <slug>
+  spawn.py issue-orch <slug> <n>
+
+  --fresh                      # start cold: ignore the key's transcript and
+                               # do not --resume. Use when you judge the prior
+                               # conversation spent (context exhausted, or it
+                               # died confused). Default resumes.
+
+  spawn.py kill <key>          # e.g. issue-orch.slug.42
+  spawn.py tick                # one pulse now
+  spawn.py status [key|slug]   # public/status.json, one ledger row, or one repo's row
+  spawn.py tail <key> [n]      # last n lines of that key's run log (default 40)
+  spawn.py watch <path>        # add a git repo to repos.txt
+  spawn.py unwatch <path>      # remove it
+```
+
+Roles are markdown contracts in [`agents/`](agents/), not code: `worker.md`
+builds, `reviewer.md` reviews, `issue-orch.md` drives one issue end to end.
+Workers cannot run `git` or `gh` at all — the merge decision never belongs to
+the thing that wrote the code.
+
+
 ## Before you point this at a real repo
 
 **Workers never merge — they cannot run git or gh at all.** The merge
