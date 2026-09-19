@@ -1,0 +1,15 @@
+[Unit]
+Description=orch auto-pull (fetch origin, fast-forward the live checkout)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/orch/deploy/orch-pull.sh
+WorkingDirectory=%h/orch
+Environment=ORCH_HOME=%h/orch
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+# The merge fires deploy/post-merge, which rebuilds the widget and restarts
+# orch-web. That restart must outlive this oneshot: a control-group kill on
+# exit would reap the very service the hook just started. Same reason
+# orch-tick.service carries it.
+KillMode=process

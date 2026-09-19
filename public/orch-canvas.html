@@ -1,0 +1,228 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>orch</title><style>html,body{margin:0;background:#0d1117;padding:12px}</style></head><body>
+<div id="orch">
+  <style>
+    #orch { font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; color: #e8e8ea; }
+    #orch * { box-sizing: border-box; }
+    #orch .bar { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+                 padding-bottom: 8px; border-bottom: 1px solid #2a2a30; margin-bottom: 10px; }
+    #orch .t { font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
+    #orch .m { color: #8b8b95; font-size: 12px; }
+    #orch .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    #orch .ok { background: #3fb950 } #orch .bad { background: #f85149 }
+    #orch .pulse { animation: p 1.6s ease-in-out infinite }
+    @keyframes p { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+    #orch a { color: #58a6ff; text-decoration: none } #orch a:hover { text-decoration: underline }
+    #orch .rp { display: flex; align-items: baseline; gap: 8px;
+                margin: 14px 0 6px; font-size: 12px; color: #8b8b95; font-weight: 500 }
+    /* orch#116: user-select:all because reaching a repo means pasting this
+       path into a shell, so one click must take the whole path. */
+    #orch .rp .rpath { font-family: ui-monospace, monospace; font-size: 11px;
+                       font-weight: 400; color: #6e7681; user-select: all;
+                       overflow-wrap: anywhere }
+    #orch .row { border-top: 1px solid #202027; padding: 7px 0; }
+    #orch .head { display: flex; gap: 8px; align-items: baseline; cursor: pointer }
+    #orch .head:hover .ti { color: #fff }
+    #orch .ti { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+    #orch .s { font-size: 11px; padding: 1px 7px; border-radius: 20px; white-space: nowrap; font-weight: 500 }
+    #orch .ACTIVE { background: #1f6feb33; color: #79c0ff }
+    #orch .CLAIMED { background: #8957e533; color: #d2a8ff }
+    #orch .REVIEW { background: #23863633; color: #7ee787 }
+    #orch .CHECKING { background: #9e6a0333; color: #e3b341 }
+    #orch .BLOCKED, #orch .ABANDONED { background: #da363333; color: #ff7b72 }
+    #orch .det { margin: 6px 0 2px 0; padding: 8px 10px; background: #16161a;
+                 border-radius: 6px; font-size: 12px; display: none }
+    #orch .det.on { display: block }
+    #orch .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin-bottom: 8px }
+    #orch .k { color: #6e7681 } #orch .v { color: #c9d1d9; word-break: break-all }
+    #orch .acts { display: flex; gap: 6px; flex-wrap: wrap }
+    #orch button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 5px;
+                   border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer }
+    #orch button:hover { background: #30363d; border-color: #8b949e }
+    #orch button.danger:hover { background: #da3633; border-color: #f85149; color: #fff }
+    #orch .al { padding: 6px 10px; border-radius: 6px; margin-bottom: 5px; font-size: 12px }
+    #orch .warn { background: #9e6a031f; border-left: 2px solid #e3b341 }
+    #orch .error { background: #da36331f; border-left: 2px solid #f85149 }
+    #orch .info { background: #1f6feb1f; border-left: 2px solid #58a6ff }
+    #orch .empty { color: #6e7681; padding: 14px 0; text-align: center; font-size: 12px }
+    #orch .ro { font-size: 11px; color: #6e7681; margin-top: 10px; text-align: center }
+    #orch .new { display: flex; gap: 6px; margin-top: 6px }
+    #orch input { font: inherit; font-size: 12px; flex: 1; min-width: 0; padding: 3px 8px;
+                  border-radius: 5px; border: 1px solid #30363d; background: #0d1117; color: #c9d1d9 }
+  </style>
+  <div class="bar">
+    <span class="t">orch</span>
+    <span class="m" id="tick">loading…</span>
+    <span class="m" id="host"></span>
+    <span class="m" id="age" style="margin-left:auto;opacity:.7"></span>
+  </div>
+  <div id="alerts"></div>
+  <div id="body"><div class="empty">fetching…</div></div>
+  <div class="ro" id="ro"></div>
+</div>
+<script>
+(function () {
+  var FEED = "https://devhost.example-tailnet.ts.net:18802/status.json";
+  var SEED = {"generated":"2026-09-01T19:10:39-04:00","timer":{"next_run":"2026-09-01T19:19:38-04:00","last_run":"2026-09-01T19:09:38-04:00","minutes_since_last":1,"every_min":10,"timer":"active","enabled":"enabled","last_exit":0},"host":{"uptime":"up 1 day, 5 hours, 35 minutes","disk":"70% of 460G","load":"0.07 0.23 0.31","openclaw_gateway":"active","live_workers":0},"repos":[{"repo":"cybermelons/ops-console","path":"/home/user/.openclaw/workspace/ops-console","slug":"ops-console","ok":true,"counts":{},"live_workers":0,"issues":[]},{"repo":"cybermelons/openclaw","path":"/home/user/.openclaw/workspace/openclaw-src","slug":"openclaw-src","ok":true,"counts":{},"live_workers":0,"issues":[]},{"repo":"cybermelons/claude-code-repo","path":"/home/user/.openclaw/workspace/claude-code-repo","slug":"claude-code-repo","ok":true,"counts":{},"live_workers":0,"issues":[]},{"repo":"cybermelons/orch","path":"/home/user/orch","slug":"orch","ok":true,"counts":{},"live_workers":0,"issues":[]}],"alerts":[]};
+  // The control bridge exists only inside openclaw. On the plain URL the page
+  // is a viewer: feature-detect rather than render buttons that cannot work.
+  var CAN_ACT = !!(window.openclaw && window.openclaw.prompt && window.openclaw.prompt.send);
+  var open = {};
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+  var mins = function (m) { return m < 0 ? "—" : m < 60 ? m + "m" : (m / 60).toFixed(1) + "h"; };
+  // A negative commit count is the feed saying it could not READ the count --
+  // not a real zero. Zero commits is a conclusion an operator acts on ("the
+  // agent produced nothing"), so a failed read must never render as one. Same
+  // convention as mins() above. See STATES.md finding 10.
+  var commits = function (c) { return c == null || c < 0 ? "—" : c; };
+  var secs = function (s) {
+    return s == null ? "—" : s < 90 ? s + "s" : s < 5400 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h";
+  };
+  var clock = function (iso) {
+    if (!iso) return "?";
+    var d = new Date(iso);
+    return isNaN(d) ? "?" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  function act(cmd) {
+    if (!CAN_ACT) return;
+    window.openclaw.prompt.send(cmd);
+  }
+
+  function detail(r, i) {
+    var s = i.session, id = "d" + r.replace(/\W/g, "") + i.issue;
+    var kv = "";
+    var add = function (k, v) { kv += '<span class="k">' + k + '</span><span class="v">' + v + "</span>"; };
+    add("branch", esc(i.branch || "—") + " · " + commits(i.commits) + " commits");
+    if (s) {
+      add("session", esc(s.id));
+      add("turns", s.turns + " · idle " + secs(s.idle_sec) + (s.mid_turn ? " · <b>mid-turn</b>" : ""));
+    } else {
+      add("session", "none yet");
+    }
+    if (i.fix_rounds) add("fix rounds", i.fix_rounds);
+    if (i.last_error) add("last error", "<code>" + esc(i.last_error.slice(-160)) + "</code>");
+    add("worktree", esc(i.worktree || "—"));
+
+    var acts = "";
+    if (CAN_ACT) {
+      var q = function (label, cmd, cls) {
+        return '<button class="' + (cls || "") + '" data-cmd="' + esc(cmd) + '">' + label + "</button>";
+      };
+      acts =
+        q("reclaim", "Run ~/orch/orchctl.sh reclaim " + r + " " + i.issue) +
+        q("kill", "Run ~/orch/orchctl.sh kill " + r + " " + i.issue, "danger") +
+        q("retry", "Run ~/orch/orchctl.sh retry " + r + " " + i.issue) +
+        (s ? q("open session", "Show me what session " + s.id + " did in " + i.worktree) : "");
+    }
+    return '<div class="det" id="' + id + '"><div class="kv">' + kv + "</div>" +
+           '<div class="acts">' + acts + "</div></div>";
+  }
+
+  function render(d) {
+    var t = d.timer || {}, h = d.host || {};
+    var stalled = t.minutes_since_last > (t.every_min || 10) * 2.5;
+    $("tick").innerHTML =
+      '<span class="dot ' + (t.timer === "active" && !stalled ? "ok" : "bad") + '"></span>' +
+      (t.last_run ? "last " + esc(clock(t.last_run)) + " · next " + esc(clock(t.next_run)) : "never run") +
+      (t.every_min ? ' <span style="opacity:.6">every ' + t.every_min + "m</span>" : "");
+    $("host").textContent =
+      (h.live_workers || 0) + " worker" + (h.live_workers === 1 ? "" : "s") +
+      " · load " + esc((h.load || "").split(" ")[0]) + " · disk " + esc(h.disk || "");
+    var gen = d.generated ? new Date(d.generated) : null;
+    var st = gen ? Math.round((Date.now() - gen.getTime()) / 60000) : -1;
+    $("age").textContent = st < 0 ? "" : st < 1 ? "just now" : st + "m ago";
+
+    $("alerts").innerHTML = (d.alerts || []).map(function (a) {
+      return '<div class="al ' + esc(a.level) + '">' + esc(a.msg) +
+             (a.url ? ' <a href="' + esc(a.url) + '" target="_blank">open</a>' : "") + "</div>";
+    }).join("");
+
+    var out = "", any = false;
+    (d.repos || []).forEach(function (r) {
+      // orch#116: the checkout path, not just the slug -- repos.txt is
+      // machine-local and one slug can map to several working trees.
+      var rpath = r.path
+        ? '<span class="rpath" title="checkout path on this machine">' + esc(r.path) + "</span>"
+        : "";
+      if (!r.ok) {
+        out += '<div class="rp"><span>' + esc(r.repo) + "</span>" + rpath +
+               "<span>— unreachable</span></div>";
+        return;
+      }
+      var n = (r.issues || []).length;
+      out += '<div class="rp"><span>' + esc(r.repo) + "</span>" + rpath +
+             '<span style="opacity:.6">' + (n ? n + " in flight" : "idle") + "</span>";
+      if (CAN_ACT) {
+        out += '<span style="margin-left:auto"><button data-new="' + esc(r.repo) + '">+ task</button></span>';
+      }
+      out += "</div>";
+      if (CAN_ACT) {
+        out += '<div class="new" id="n' + r.repo.replace(/\W/g, "") + '" style="display:none">' +
+               '<input placeholder="what should an agent do in ' + esc(r.repo) + '?">' +
+               '<button data-queue="' + esc(r.repo) + '">queue</button></div>';
+      }
+      (r.issues || []).forEach(function (i) {
+        any = true;
+        var live = i.session && i.session.mid_turn;
+        out += '<div class="row"><div class="head" data-t="' +
+               esc("d" + r.repo.replace(/\W/g, "") + i.issue) + '">' +
+               '<span class="dot ' + (i.worker_alive ? "ok" : "") + (live ? " pulse" : "") +
+               '" style="' + (i.worker_alive ? "" : "background:#30363d") + '"></span>' +
+               '<a href="' + esc(i.url) + '" target="_blank">#' + i.issue + "</a>" +
+               '<span class="s ' + esc(i.state) + '">' + esc(i.state) + "</span>" +
+               '<span class="ti">' + esc(i.title) + "</span>" +
+               '<span class="m">' + mins(i.age_min) + "</span></div>" +
+               detail(r.repo, i) + "</div>";
+      });
+    });
+    $("body").innerHTML = any ? out : '<div class="empty">queue empty — nothing in flight</div>';
+    $("ro").textContent = CAN_ACT ? "" : "read-only — pin this in openclaw to act on it";
+    wire();
+  }
+
+  function wire() {
+    $("body").querySelectorAll("[data-t]").forEach(function (el) {
+      el.onclick = function (e) {
+        if (e.target.tagName === "A") return;
+        var id = el.getAttribute("data-t"), d = $(id);
+        if (d) { open[id] = !open[id]; d.className = "det" + (open[id] ? " on" : ""); }
+      };
+    });
+    $("body").querySelectorAll("[data-cmd]").forEach(function (b) {
+      b.onclick = function () { act(b.getAttribute("data-cmd")); b.textContent = "sent"; };
+    });
+    $("body").querySelectorAll("[data-new]").forEach(function (b) {
+      b.onclick = function () {
+        var box = $("n" + b.getAttribute("data-new").replace(/\W/g, ""));
+        if (box) box.style.display = box.style.display === "none" ? "flex" : "none";
+      };
+    });
+    $("body").querySelectorAll("[data-queue]").forEach(function (b) {
+      b.onclick = function () {
+        var repo = b.getAttribute("data-queue");
+        var box = $("n" + repo.replace(/\W/g, "")), txt = box && box.querySelector("input").value.trim();
+        if (!txt) return;
+        act("Run ~/orch/orchctl.sh queue " + repo + " " + JSON.stringify(txt));
+        box.querySelector("input").value = ""; b.textContent = "queued";
+      };
+    });
+    Object.keys(open).forEach(function (id) {
+      var d = $(id); if (d && open[id]) d.className = "det on";
+    });
+  }
+
+  function poll() {
+    fetch(FEED, { cache: "no-store" }).then(function (r) { return r.json(); }).then(render).catch(function () {});
+  }
+  if (SEED) { try { render(SEED); } catch (e) {} }
+  poll();
+  setInterval(poll, 30000);
+})();
+</script>
+</body></html>

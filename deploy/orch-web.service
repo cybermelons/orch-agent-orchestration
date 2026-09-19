@@ -1,0 +1,14 @@
+[Unit]
+Description=orch web UI
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m orch.server
+WorkingDirectory=%h/orch
+Environment=ORCH_HOME=%h/orch
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

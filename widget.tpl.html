@@ -1,0 +1,2223 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>orch</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1117; color: #e8e8ea;
+               -webkit-text-size-adjust: 100%; }
+  body { padding: 14px; padding: max(14px, env(safe-area-inset-top))
+                        max(14px, env(safe-area-inset-right))
+                        max(14px, env(safe-area-inset-bottom))
+                        max(14px, env(safe-area-inset-left)); }
+  @media (prefers-color-scheme: light) {
+    html:not([data-theme="dark"]), html:not([data-theme="dark"]) body {
+      background: #0d1117;   /* the panel is dark by design; keep it legible */
+    }
+  }
+</style>
+</head>
+<body>
+<div id="orch">
+  <style>
+    /* ===================================================================
+       THE SHAPE SYSTEM (docs/UX-REDESIGN.md section 3)
+       -------------------------------------------------------------------
+       Four shapes plus furniture. What is genuinely shared is ONLY: the
+       type scale, the mark vocabulary (pills/dots), the verb slot, the
+       vertical rhythm, and "wrap, never truncate".
+
+       NOT shared: the grid. The previous design generalized one repo row
+       into a universal table contract, which broke three times at phone
+       width because journal entries, definition pairs, section headers and
+       gap markers do not have that structure. So each shape below owns its
+       own layout AND its own 390px fold rule, and there is deliberately no
+       single universal media query. The definition pair (3.3) is fold-free
+       by construction and no media query touches it.
+       =================================================================== */
+
+    /* Design tokens (docs/UX-REDESIGN.md artboard). Declared on #orch, not
+       :root: every rule in this file is #orch-scoped by discipline, and a
+       :root custom property would break that scoping for no gain. Artboard's
+       own reason: "Every pad, gap and indent is a multiple, so nested
+       elements land on the same vertical rhythm as their parents." */
+    #orch { --u: 4px; --pad: 12px; --gap: 8px; --indent: 20px; --ctl: 24px; }
+    /* Cap line length on wide screens (orch#186). Artboards are drawn at
+       560px, but a live repo carries more issues than the artboards' three,
+       and .er packs identity + state pill + age + two verbs on one line —
+       560 would crowd it, so 880px instead. Left-aligned, not centred: this
+       is a polling dashboard, and centring would shove content sideways on
+       every window resize. */
+    #orch { font: 13px/20px ui-sans-serif, system-ui, sans-serif; color: #e8e8ea; background: #0d1117; max-width: 880px; }
+    #orch * { box-sizing: border-box; }
+    #orch a { color: #58a6ff; text-decoration: none } #orch a:hover { color: #79c0ff; text-decoration: underline }
+
+    /* --- shared: the mark vocabulary ---------------------------------- */
+    /* Artboard says 8x8 (was 7x7). Sized here, not on .dot.auto, so the
+       colour-only dot and the automerge-outlined dot never disagree on box
+       size -- see orch#163 below for why the box size must never change
+       depending on state. */
+    #orch .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+    /* orch#163: the dot carries TWO independent facts. Colour is status
+       (ok/off/bad below); the rounded-square outline means automerge is on.
+       Verbatim from the original design note: "STATUS DOT = AUTOMERGE
+       TOGGLE. Colour is status; the rounded-square outline means automerge
+       is on. Tapping it flips automerge." An outline (not a border) is used
+       so the box's own width/height never change -- the dot sits in a flex
+       row and must not reflow the row when automerge flips.
+
+       The artboard draws this same fact a second way -- `.st`/`.st.auto`, a
+       20x20 box whose BORDER-color carries automerge-on. Not implemented
+       here, deliberately: it and the outline above are two mechanisms for
+       one fact, and orch#163's is the one wired to markup. Shipping the
+       rival as unused CSS would invite a later session to wire it and leave
+       the page drawing automerge two ways, free to disagree -- the exact
+       failure this file's header comment describes. If the artboard's box
+       is wanted, it REPLACES the outline in one change, markup included;
+       it does not land beside it. Note the artboard's own 1px border does
+       reflow a flex row, which is why orch#163 chose an outline. */
+    #orch .dot.auto { outline: 1px solid #1f6feb; outline-offset: 1px; border-radius: 3px; cursor: pointer; }
+    #orch .ok { background: #3fb950 } #orch .bad { background: #f85149 }
+    #orch .off { background: #30363d }
+    #orch .pulse { animation: p 1.6s ease-in-out infinite }
+    @keyframes p { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+    /* Status chips (artboard 1e). Formula: every chip background is its
+       foreground hue at `33` alpha. One formula, six chips -- keep it when
+       adding a state. */
+    #orch .s { font-size: 11px; height: 18px; padding: 0 7px; border-radius: 20px;
+               white-space: nowrap; font-weight: 500; display: inline-flex; align-items: center; }
+    #orch .ACTIVE { background: #1f6feb33; color: #79c0ff }
+    #orch .CLAIMED { background: #8957e533; color: #d2a8ff }
+    #orch .REVIEW { background: #23863633; color: #7ee787 }
+    #orch .CHECKING { background: #9e6a0333; color: #e3b341 }
+    #orch .BLOCKED, #orch .ABANDONED { background: #da363333; color: #ff7b72 }
+    #orch .LANDED { background: #23863633; color: #7ee787 }
+    /* #87: UNCLAIMED reaches a pill now that one pill carries both axes.
+       It had no rule before because only work_state was rendered here and
+       work_state has no such value -- an unstyled pill would have been bare
+       text. Neutral grey on purpose: nobody holds it, so it is not a state
+       anything is happening in. */
+    #orch .UNCLAIMED { background: #6e768126; color: #a8b1bb }
+    /* The loud mark: a needs-you row's condition level. Not a state pill --
+       a condition is a judgement the FEED made, the pills are derived state. */
+    #orch .lvl-error { color: #ff7b72 } #orch .lvl-warn { color: #e3b341 }
+    #orch .lvl-info { color: #58a6ff }
+
+    /* --- shared: the verb slot ---------------------------------------- */
+    /* One button style everywhere. Artboard 1d fixes controls to a 24px
+       box ("var(--ctl)") -- its stated reason: "so rows never change
+       height." A verb appearing/disappearing must not reflow the list.
+       This supersedes the previous 28px min-height (a thumb-target rule);
+       the artboard's fixed-height requirement wins because a variable
+       height per verb count is exactly what it rules out. */
+    /* a.btn rides the SAME declarations as button, never a copy of them: the
+       verb slot mixes real buttons with link-verbs (verbLink) and the two must
+       stay pixel-identical beside each other in one row. A second block would
+       drift the moment either is touched. The extras below `cursor` are what
+       an <a> does not inherit from a <button>. */
+    #orch button, #orch a.btn { font: inherit; font-size: 12px; height: var(--ctl); padding: 0 8px;
+                   border-radius: 6px; border: 1px solid #30363d; background: #21262d;
+                   color: #c9d1d9; cursor: pointer;
+                   display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+                   box-sizing: border-box }
+    #orch button:hover, #orch a.btn:hover { background: #30363d; border-color: #8b949e }
+    /* Artboard's quiet control variant: same box, muted text. */
+    #orch button.q, #orch a.btn.q { color: #8b8b95 }
+    /* Artboard's icon control: the 24px box squared off, no horizontal
+       padding, glyph centered.
+
+       These two match no markup YET -- nothing emits class `q` or `icon`.
+       Kept, where .e.head and .st were not, because the operator's own
+       ruling names icon verbs as already specified: this is the box the
+       controls land in, and the control that fills it belongs to orch#257.
+       Geometry here, control there, per that division. If #257 resolves
+       some other way, these come out with it rather than lingering. */
+    #orch button.icon, #orch a.btn.icon { width: var(--ctl); padding: 0;
+                   display: inline-flex; align-items: center; justify-content: center }
+    #orch button.danger:hover { background: #da3633; border-color: #f85149; color: #fff }
+    #orch button.danger.armed { background: #da3633; border-color: #f85149; color: #fff }
+    #orch button.danger.armed:hover { background: #f85149; border-color: #ff7b72 }
+    /* Deliberately muted/neutral, never the danger colour: a dismiss is a
+       per-browser display preference (#106), not a repo act, and must not
+       read as the risky control next to it. */
+    #orch button.ghost { color: #8b949e; background: #21262d; border-color: #30363d }
+    #orch button.ghost:hover { color: #c9d1d9; background: #30363d; border-color: #484f58 }
+    #orch button[disabled] { opacity: .4; cursor: not-allowed }
+    #orch button[disabled]:hover { background: #21262d; border-color: #30363d }
+    /* orch#163: the automerge dot is a <span data-act>, not a <button> --
+       it must not grow the row's box (see .dot.auto above), so it cannot
+       be a real form control. `disabled` on a span is inert for the
+       browser's native click-suppression (act() itself still no-ops via
+       CAN_ACT, see :503), but it still needs the same visual "can't act
+       right now" cue every button[disabled] gets. */
+    #orch .dot[disabled] { opacity: .4; cursor: not-allowed }
+    #orch .verbs { display: flex; gap: 6px; align-items: center; flex: none }
+
+    /* --- shared: type + rhythm ---------------------------------------- */
+    #orch .m { color: #8b8b95; font-size: 12px }
+    #orch .k2 { font-family: ui-monospace, monospace; font-size: 11px; color: #c9d1d9;
+                overflow-wrap: anywhere }
+    #orch .disabled { color: #6e7681; cursor: not-allowed }
+
+    /* ===== 3.1 ENTITY ROW ==============================================
+       [mark] [identity] [status/what ……] [age] [verbs 0-2]
+       Its OWN grid: five columns, identity and status take the slack.
+       Columns per the artboard: [dot] .n name | .w sub | .a age | .v verbs
+       -- mapped onto this file's existing area names (mark/id/what/age/
+       verbs), not renamed, since no markup here emits the artboard's
+       shorter class names. Row height fixed at 32px, every row, every
+       section, per the artboard: a variable-height row is exactly what a
+       fixed-height control box (1d, .btn) exists to prevent reflow for.
+
+       The 6px padding is load-bearing, not taste: 6 + the 20px line-height
+       + 6 lands a single-line row on exactly 32px, so min-height is the
+       floor a wrapped row grows from rather than a number nothing reaches.
+       At the 7px it was, every row rendered 34px and the 32px never bound
+       -- a 2px error that compounds down a long list. Retune the padding
+       and the line-height together or the row leaves the artboard's
+       rhythm. */
+    #orch .er { display: grid; align-items: baseline; column-gap: var(--gap); row-gap: 3px;
+                /* orch#340: id is minmax(<floor>,auto), what is the 1fr.
+                   NOT the other way round -- `auto` outranks `1fr` for content
+                   width, so when id was the 1fr and what was auto, what took
+                   its full natural width first and id got the remainder, with
+                   minmax(0,...) letting it collapse toward zero. A 132px repo
+                   slug rendered in 65px and overflow-wrap: anywhere broke it
+                   one character per line. Identity is the scan column and
+                   takes its natural width; what is prose and yields, which is
+                   what its overflow-wrap is for. Five tracks, five areas --
+                   the count the fold and the sub-line rule depend on is
+                   unchanged, this is sizing only. */
+                grid-template-columns: 20px minmax(12ch,auto) minmax(0,1fr) auto auto;
+                grid-template-areas: "mark id what age verbs";
+                min-height: 32px; padding: 6px 0; border-top: 1px solid #202027 }
+    /* orch#289 (part 4): the journal-tail sub-line. A SECOND GRID ROW, not a
+       sixth column -- the comment above and the 390px fold below both depend
+       on exactly five areas / three columns at the fold, and a new column
+       would break both. Spans every content column except mark, so it lines
+       up under identity/what rather than under the dot. Emitted only when
+       entityRow's `sub` is truthy (see entityRow below), so the grid's own
+       row collapses to nothing and every caller that never passes `sub`
+       stays byte-identical. */
+    #orch .er.has-sub { grid-template-areas: "mark id   what  age verbs"
+                                              "mark sub  sub  sub  sub" }
+    #orch .er > .er-mark { grid-area: mark; align-self: center }
+    #orch .er > .er-sub  { grid-area: sub; color: #6e7681; font-size: 12px;
+                            overflow: hidden; text-overflow: ellipsis;
+                            white-space: nowrap }
+    /* The repo fold's disclosure glyph (#160 review finding 4): lives INSIDE
+       er-mark next to the live dot, never a grid column of its own -- the
+       .er grid above has exactly five areas and neither this rule nor the
+       390px fold below touches that count. Only repoRow() emits it (an
+       unreachable repo has no toggle and gets no glyph), so this is a
+       styling hook, not a structural one. */
+    #orch .er > .er-mark .fold-mark { color: #6e7681; font-size: 10px; margin-right: 2px;
+                                       display: inline-block; width: 8px }
+    #orch .er > .er-id   { grid-area: id; font-weight: 500; overflow-wrap: anywhere }
+    #orch .er > .er-what { grid-area: what; color: #a8b1bb; overflow-wrap: anywhere }
+    /* orch#289 (part 3): display_name renders alongside the full title, not
+       instead of it -- .dim is the title's secondary weight, same #8b8b95
+       used elsewhere in this file for de-emphasized text (.er-age, .sh-t). */
+    #orch .er .dim { color: #8b8b95 }
+    /* Artboard's .a: tabular-nums, right-aligned, min-width 34px so the age
+       column never jitters as digit count changes. */
+    #orch .er > .er-age  { grid-area: age; color: #8b8b95; font-size: 12px; white-space: nowrap;
+                            font-variant-numeric: tabular-nums; text-align: right; min-width: 34px }
+    #orch .er > .er-verbs{ grid-area: verbs; display: flex; gap: 6px; align-items: center }
+    /* The light variant: WHAT MOVED rows and AVAILABLE rows. No mark, no
+       verbs, dimmed -- secondary weight is a colour change, not a second
+       grid (section 4.1: AVAILABLE is "visible but visually lighter"). */
+    #orch .er.lite { color: #8b8b95 } #orch .er.lite > .er-id { font-weight: 400 }
+    /* The loud variant: a needs-you row. Dominant weight, per 4.1. */
+    #orch .er.loud > .er-id { font-weight: 600; color: #fff }
+    #orch .er.loud > .er-what { color: #e8e8ea }
+    /* The repo row (artboard's .e.repo): heavier, its own ground.
+       `.repo` is IDENTITY -- this row is a repo -- and is applied to every
+       repo row in both sections. `.toggle` is AFFORDANCE -- this row folds
+       something -- and is applied only when there is a .det block to fold
+       (#259). They were one class until a paused repo needed the first
+       without the second: an AVAILABLE repo has issues: [], so it folds
+       nothing, but it is still a repo and must not render as a bare nested
+       row. Keep them separate; a selector that means two things cannot be
+       given to a row that is only one of them. */
+    #orch .er.repo { background: #12161c; border-top: 1px solid #30363d }
+    #orch .er.repo > .er-id { font-weight: 600; font-size: 14px }
+    #orch .er.repo > .er-what .k2 { font-family: ui-monospace, monospace; font-size: 11px; color: #6e7681 }
+    /* The nest variant (#150): an issue row one level under its repo. SAME
+       cells as any entity row (3.1) -- only the left inset changes, via
+       padding rather than a grid-column shift, so the 390px fold rule below
+       applies unchanged and needs no rule of its own.
+       GOVERNING RULE from the artboard: "indent only the identity, keep
+       every other column aligned." ONLY the identity cell gets the indent
+       -- age and verbs stay in their columns across every row type, so the
+       padding lands on .er-id, not on .er.nest itself (which would shift
+       the whole grid, including age/verbs, out of their columns). */
+    #orch .er.nest { border-top: 1px solid #101013 }
+    #orch .er.nest > .er-id { padding-left: var(--indent) }
+    /* The artboard's third row variant, .e.head -- a section-adjacent row
+       with a plain top border and no weight change -- is NOT implemented.
+       Nothing emits it: entityRow's cls is only ever loud/toggle/nest/lite.
+       Same standard the .st box was held to above; a rule matching no
+       markup is not transcription, it is a guess at what a later markup
+       change will want. It lands with the markup that needs it. */
+    /* 3.1's fold, and ONLY 3.1's. Line 1 = mark + identity + age, with the
+       age still top-RIGHT so the scan column survives the fold. Line 2 =
+       status/what, wrapping freely. Line 3 = verbs, right-aligned, and the
+       row only reserves that line when verbs actually exist (the grid's
+       last row collapses to nothing when .er-verbs is absent). */
+    @media (max-width: 390px) {
+      #orch .er { grid-template-columns: auto 1fr auto;
+                  grid-template-areas: "mark id  age"
+                                       "what what what"
+                                       "verbs verbs verbs" }
+      #orch .er > .er-verbs { justify-content: flex-end; margin-top: 2px }
+      /* orch#289: the sub-line gets its own full-width row here too, same
+         reasoning as the age/what/verbs rows above it. */
+      #orch .er.has-sub { grid-template-areas: "mark id  age"
+                                                "what what what"
+                                                "sub  sub  sub"
+                                                "verbs verbs verbs" }
+    }
+
+    /* ===== 3.2 LOG ROW =================================================
+       [time] [actor] [message ……] -- time LEADS because time is the
+       identity of a log entry. No mark, no verbs, no state. */
+    #orch .lg { display: grid; align-items: baseline; column-gap: 10px; row-gap: 2px;
+                grid-template-columns: auto auto 1fr;
+                grid-template-areas: "time actor msg";
+                padding: 5px 0; border-top: 1px solid #16161a }
+    #orch .lg > .lg-time  { grid-area: time; font-family: ui-monospace, monospace;
+                            font-size: 11px; color: #8b8b95; white-space: nowrap }
+    #orch .lg > .lg-actor { grid-area: actor; color: #6e7681; font-size: 12px; white-space: nowrap }
+    #orch .lg > .lg-msg   { grid-area: msg; overflow-wrap: anywhere }
+    /* The gap marker is this shape's DIVIDER: full width, no cells, cannot
+       break at any width -- which is why it is a sibling rule and not a
+       variant of the .lg grid above. */
+    #orch .lg-gap { padding: 8px 0 6px; color: #6e7681; font-size: 11px;
+                    text-align: center; letter-spacing: .02em;
+                    border-top: 1px solid #16161a }
+
+    /* 3.2's fold, and ONLY 3.2's: line 1 = time + actor, message wraps
+       below at full width. Nothing else changes. */
+    @media (max-width: 390px) {
+      #orch .lg { grid-template-columns: auto 1fr;
+                  grid-template-areas: "time actor"
+                                       "msg  msg" }
+    }
+
+    /* ===== 3.3 DEFINITION PAIR ==========================================
+       [label] [value ……] -- the issue page's state block. FOLD-FREE BY
+       CONSTRUCTION: the label column is short and fixed, values wrap in
+       place, a value's control wraps to its own line if it must. There is
+       deliberately NO media query for this shape anywhere in this file. */
+    #orch .dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
+                margin: 4px 0 10px }
+    #orch .dl > dt { color: #6e7681; white-space: nowrap }
+    #orch .dl > dd { margin: 0; color: #c9d1d9; overflow-wrap: anywhere;
+                     display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap }
+
+    /* ===== 3.4 SECTION HEADER ===========================================
+       [title (count)] [controls] -- a title governing the rows below it.
+       28px tall (artboard 1c). Label #c9d1d9/600/.03em is the title's own
+       weight; the (count) suffix stays the dimmer #8b8b95 -- see .sh-t's
+       child rule below, since title and count share one text node's worth
+       of markup here (sectionHead() concatenates them into .sh-t) and the
+       count needs its own span to take a different colour from the title
+       it follows. */
+    #orch .sh { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+                min-height: 28px; margin: 14px 0 2px; padding-bottom: 2px;
+                border-bottom: 1px solid #30363d;
+                font-size: 12px; color: #8b8b95;
+                font-weight: 600; letter-spacing: .03em; text-transform: uppercase }
+    #orch .sh .sh-t { flex: none; color: #c9d1d9 }
+    #orch .sh .sh-c { margin-left: auto; display: flex; gap: 4px; align-items: center;
+                      flex-wrap: wrap; text-transform: none; letter-spacing: normal }
+    #orch .sh.primary { color: #c9d1d9; font-size: 12px }
+    /* Reduced weight: WHAT MOVED's outcome sub-headings (Landed/Moved/Not
+       started) are this shape, quieter. The group IS the structure, so it
+       gets a real header rather than a label jammed into an identity cell. */
+    #orch .sh.sub { margin: 10px 0 0; text-transform: none; letter-spacing: normal;
+                    color: #6e7681; font-size: 12px }
+    #orch .sh.toggle { cursor: pointer } #orch .sh.toggle:hover { color: #c9d1d9 }
+    /* #160: a repo row is also a toggle (folds its nested issue rows) --
+       same affordance as .sh.toggle above, on the entity-row shape instead. */
+    #orch .er.toggle { cursor: pointer } #orch .er.toggle:hover { color: #c9d1d9 }
+
+    /* 3.4's fold, and ONLY 3.4's: controls wrap to a second line under the
+       title; chips wrap, they never scroll horizontally. */
+    @media (max-width: 390px) {
+      #orch .sh .sh-c { margin-left: 0; flex-basis: 100% }
+    }
+
+    /* ===== 3.5 FURNITURE ================================================
+       Full-width single-cell lines with no grid at all: quiet-state lines,
+       the resume code line, the steering link, empty-state hints, the
+       footer. Cannot break at any width because nothing is aligned. */
+    #orch .fu { padding: 7px 0; color: #8b8b95; overflow-wrap: anywhere }
+    #orch .fu.quiet { color: #7ee787 }
+    #orch .fu.cond { color: #ff7b72; font-weight: 500 }
+    #orch .fu.code { font-family: ui-monospace, monospace; font-size: 11px;
+                     background: #16161a; border-radius: 6px; padding: 8px 10px;
+                     color: #c9d1d9; user-select: all }
+    #orch .fu.struck { color: #6e7681; text-decoration: line-through }
+    #orch .fu.hint { color: #6e7681; font-size: 12px }
+
+    /* --- navigation chrome: a back-link plus a title. No breadcrumbs:
+       at two clicks of maximum depth a breadcrumb system is decoration
+       (section 2). --------------------------------------------------- */
+    #orch .nav { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+                 padding-bottom: 8px; border-bottom: 1px solid #2a2a30; margin-bottom: 4px }
+    #orch .nav .t { font-weight: 600; font-size: 15px; letter-spacing: -.01em }
+    /* orch#116: the checkout path is the only unambiguous repo identifier --
+       repos.txt is machine-local and one slug can map to several working
+       trees. user-select:all because reaching a repo means pasting this
+       into a shell, so one click must take the whole path. */
+    #orch .nav .rpath { font-family: ui-monospace, monospace; font-size: 11px;
+                        color: #8b8b95; user-select: all; overflow-wrap: anywhere }
+    #orch .nav .right { margin-left: auto; display: flex; gap: 8px; align-items: baseline }
+
+    /* Inline verb output. The global page-bottom #out pre is CUT (section
+       7): output renders at its cause, which on the issue page is the
+       ACTIONS block. */
+    #orch .out { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 11px;
+                 color: #8b8b95; max-height: 220px; overflow: auto; margin: 6px 0 0;
+                 padding: 8px; background: #16161a; border-radius: 6px }
+    #orch .out:empty { display: none }
+
+    #orch .foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                  margin-top: 18px; padding-top: 8px; border-top: 1px solid #2a2a30;
+                  font-size: 12px; color: #8b8b95 }
+    #orch .foot .right { margin-left: auto; display: flex; gap: 10px; align-items: center }
+    #orch .ro { font-size: 11px; color: #6e7681; margin-top: 8px }
+    #orch .det { display: none } #orch .det.on { display: block }
+    #orch .wks { margin: 2px 0 2px 16px; color: #8b8b95; font-size: 12px }
+    /* The blocking review findings (#117). pre-wrap because these are
+       agent-authored prose whose
+       own line breaks carry meaning -- a note reflowed into one paragraph
+       loses the structure the agent wrote it with. */
+    #orch .note { margin: 2px 0 6px 16px; color: #c9d1d9; font-size: 12px;
+                  white-space: pre-wrap; word-break: break-word;
+                  border-left: 2px solid #30363d; padding-left: 8px }
+
+    /* Text scales UP under 390px, never down (section 3, "what is genuinely
+       shared"). One rule, on the root, because it is the type scale -- not
+       a per-shape fold. */
+    @media (max-width: 390px) {
+      #orch { font-size: 14px }
+    }
+
+    /* Runtime-error toasts (#169). Fixed, not in #body, because render()
+       rebuilds #body wholesale on every poll -- a toast parented there would
+       vanish 1.2s after the failure it reports. Errors only: a derived
+       condition (a blocked repo) is state and renders as issue state, never
+       here. */
+    #orch-toasts { position: fixed; right: 12px; bottom: 12px; z-index: 50;
+                   display: flex; flex-direction: column; gap: 6px;
+                   max-width: min(420px, calc(100vw - 24px)) }
+    #orch-toasts .toast { background: #2d1518; border: 1px solid #f85149;
+                          border-left-width: 3px; border-radius: 6px;
+                          padding: 8px 10px; color: #ffdcd7; font-size: 12px;
+                          cursor: pointer; white-space: pre-wrap;
+                          word-break: break-word }
+    #orch-toasts .toast b { color: #ff9c92; font-weight: 600 }
+  </style>
+  <div id="body"><div class="fu hint">fetching…</div></div>
+  <!-- Toast host (#169). A SIBLING of #body, never a child: render() replaces
+       #body's innerHTML on every poll, and a toast inside it would be erased
+       ~1.2s after the failure it names. -->
+  <div id="orch-toasts"></div>
+  <div class="ro" id="ro"></div>
+</div>
+<script>
+(function () {
+  // Root-relative, NEVER an absolute URL. The server that serves this page
+  // serves the feed too (server.py: "/" -> public/widget.html, "/status.json"
+  // -> public/status.json), so the feed is same-origin by construction and
+  // the origin is not this file's to know. An absolute literal carrying a
+  // port cannot be right on a machine where the port is ORCH_PORT: the two
+  // drifted, SAME_ORIGIN was then false for every viewer on every load, and
+  // the page still RENDERED from the baked-in SEED - so the dead live-update
+  // path looked like a working page with data one tick old (#82).
+  var FEED = "/status.json";
+  var SEED = __SEED__;
+  // Buttons post to the same origin that served this page. No bridge, no
+  // approval, no re-staging - and where /act is absent it stays a viewer.
+  // CAN_ACT no longer decides whether a control EXISTS, only whether it is
+  // usable: every control is always emitted (#66). ACT_REASON carries why a
+  // control is dead, so the operator reads a cause instead of a blank page.
+  var CAN_ACT = false;
+  var ACT_REASON = "checking whether this page can act…";
+  // The last feed object render() was given. The probe resolves after the
+  // first render(SEED), so it needs something to repaint FROM when it cannot
+  // poll - off-origin poll() is a no-op, which is exactly why the old code
+  // never flipped a real browser out of its button-less first paint.
+  var last_data = null;
+  fetch("/act", { method: "POST", body: '{"action":"probe"}' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d && d.ok) { CAN_ACT = true; ACT_REASON = ""; }
+      else { ACT_REASON = "the /act endpoint answered but refused this page"; }
+      repaint();
+    })
+    .catch(function (e) {
+      // Never swallow this. A dead probe is the single most common reason the
+      // controls are inert, and the operator can only act on a named cause.
+      ACT_REASON = "cannot reach the /act endpoint: " + (e && e.message ? e.message : e);
+      repaint();
+    });
+  // poll() is a hoisted function declaration, and SAME_ORIGIN - with the
+  // FEED_ORIGIN it is derived from (#82) - is a var assigned during this same
+  // IIFE body, all before any fetch callback can run.
+  function repaint() {
+    if (SAME_ORIGIN) { poll(); }
+    else if (last_data) { render(last_data); }
+  }
+  // Every control is always emitted. CAN_ACT decides only whether it is
+  // usable; ACT_REASON is why not, shown on hover. A control that
+  // vanishes is indistinguishable from one that was never built (#66).
+  function actAttrs(reason) {
+    var why = reason || ACT_REASON;
+    return CAN_ACT ? "" : ' disabled title="' + esc(why) + '"';
+  }
+  // A control whose visible text is its accessible name but whose PURPOSE
+  // needs a sentence. actAttrs() emits its own title when the page cannot
+  // act, and two title attributes on one tag is invalid HTML (the first
+  // wins), so the static tooltip yields to the live reason: pass `free` as
+  // `!attrs` from the SAME actAttrs() result the tag already carries.
+  // No aria-label here on purpose -- these buttons have visible text, and an
+  // aria-label would override it, so a voice-control user saying "click send"
+  // would stop matching the word on screen.
+  function tipAttrs(tip, free) {
+    return free ? ' title="' + esc(tip) + '"' : "";
+  }
+  // Same contract, for a control that is dead for a reason of its OWN (no PR
+  // yet, nothing to tail) rather than because the page cannot act at all. The
+  // page-wide reason still wins when there is one, since it is the deeper
+  // cause: fix that and the specific reason may resolve itself.
+  function actAttrsIf(dead, reason) {
+    if (!CAN_ACT) return actAttrs();
+    return dead ? ' disabled title="' + esc(reason) + '"' : "";
+  }
+  // A control that touches NOTHING on the server -- it only writes this
+  // browser's localStorage. CAN_ACT says whether the page may act on the
+  // SERVER, so it must not gate this: a viewer-mode page can still hide a
+  // row from itself (#106). Only the control's own reason can kill it.
+  function localAttrs(dead, reason) {
+    return dead ? ' disabled title="' + esc(reason) + '"' : "";
+  }
+  // A control the SERVER cannot perform yet -- its action lands in stage 2
+  // (docs/UX-REDESIGN.md section 8). Emitted like everything else (#66) and
+  // disabled with the reason, so the operator reads "not built yet" instead
+  // of wondering where the button went. Deliberately NOT actAttrsIf: the
+  // page-wide probe reason is irrelevant here, the control is dead on a
+  // fully live page too.
+  function stageTwoAttrs(what) {
+    return ' disabled title="' + esc(what + " — stage 2 (docs/UX-REDESIGN.md section 8); no server action exists for it yet") + '"';
+  }
+  // Collapsed-section state (other sessions, inactive lists). render()
+  // rebuilds the whole page from an HTML string, so "which disclosure is
+  // open" cannot live in the DOM -- the next poll would wipe it.
+  var open = {};
+  // Seed repo fold state from localStorage (#160) BEFORE the first render:
+  // `open` records what is OPEN, the FOLD_KEY store records what is FOLDED,
+  // so a repo is open unless the store names it -- an empty/corrupt store
+  // (foldedSet() returns {}) seeds nothing here, which is exactly the
+  // expanded-by-default posture #66 requires. This only ever ADDS keys
+  // carrying the "rp-" prefix (see foldId() below -- checked here as a
+  // literal, not by calling foldId(), because foldId is declared further
+  // down the file and this IIFE runs before that assignment executes), so
+  // it cannot clobber the unrelated "dun" (other sessions) entry, which is
+  // seeded lazily by the click handler instead and is never persisted. A
+  // stale FOLD_KEY entry left over from some other id scheme is skipped,
+  // not copied in, which is what keeps this loop honest against its own
+  // comment (#160 review finding 2).
+  (function seedFoldedRepos() {
+    var folded = foldedSet();
+    for (var k in folded) {
+      if (folded.hasOwnProperty(k) && k.indexOf("rp-") === 0) { open[k] = false; }
+    }
+  })();
+  // Per-issue verb output, keyed by idsafe(slug)+issue, held out of the DOM
+  // for the same reason: a 30s poll would erase a tail the operator is
+  // reading. The global #out pre is CUT (section 7), so this is where
+  // tail output lives -- at its cause, on the issue page.
+  var out_text = {};
+  // The RUN LOG section's fetched body, same held-out-of-DOM reason as
+  // out_text (poll wipes the box every 30s) but a SEPARATE store: out_text
+  // holds tail's raw text, painted via textContent; this holds runLogBody's
+  // pre-escaped HTML, painted via innerHTML (orch#151). One store per paint
+  // method, so a future out_text value can never be run through innerHTML
+  // by accident.
+  var run_log_text = {};
+  // MIRRORS orch/server.py's SLUG regex exactly, including the length bound
+  // -- server.py rejects any /act path that fails this after stripping every
+  // "~" (Python's str.replace has no count limit, hence the /g flag here).
+  // Any control that sends a slug must refuse to offer a path the server
+  // will reject, so these two must stay in step: changing one without the
+  // other reintroduces #75.
+  var SLUG_OK = /^[A-Za-z0-9._\/-]{1,120}$/;
+  var armed = null;
+  // The feed's own `generated` stamp, kept outside the DOM so the age readout
+  // can be recomputed between renders without refetching anything.
+  var generated_at = null;
+  // The idle threshold, read from the feed. The old hardcoded 25 is CUT
+  // (section 7): the feed exports the one real number, and a client-side
+  // copy is a second threshold that can disagree with the tick's.
+  var NUDGE_IDLE_MINS = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+  var idsafe = function (s) { return String(s).replace(/\W/g, ""); };
+  // The repo fold's OWN id builder (#160 review finding 1) -- NOT idsafe()
+  // above. idsafe() DELETES every non-word character, so "cybermelons/orch-
+  // web" and "cybermelons/orchweb" both collapse to "cybermelonsorchweb":
+  // idsafe's other call site (the per-issue output sink, ~line 1435) just
+  // gets a wrong object key when two slugs collide there, which is a quiet
+  // bug. Here the same collision is a stronger failure -- two repo rows
+  // would render the SAME DOM id, so getElementById resolves only the
+  // first and the second row's toggle is dead -- so the fold needs an id
+  // builder that is actually injective. Every non-word character is
+  // replaced with its own escape (`_<charCode>_`) instead of dropped, so
+  // two distinct slugs can never produce the same encoded tail. The "rp-"
+  // prefix carries a delimiter (a hyphen, valid in an HTML id) so the
+  // prefix test in wire() (~line 1574) cannot misfire against some future
+  // unrelated id that merely starts with "rp".
+  var foldId = function (slug) {
+    return "rp-" + String(slug).replace(/\W/g, function (c) { return "_" + c.charCodeAt(0) + "_"; });
+  };
+  var mins = function (m) { return m == null || m < 0 ? "—" : m < 60 ? m + "m" : (m / 60).toFixed(1) + "h"; };
+  // A negative commit count is the feed saying it could not READ the count --
+  // not a real zero. Zero commits is a conclusion an operator acts on ("the
+  // agent produced nothing"), so a failed read must never render as one. Same
+  // convention as mins() above. See STATES.md finding 10.
+  var commits = function (c) { return c == null || c < 0 ? "—" : c; };
+  var secs = function (s) {
+    return s == null ? "—" : s < 90 ? s + "s" : s < 5400 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h";
+  };
+  var clock = function (iso) {
+    if (!iso) return "?";
+    var d = new Date(iso);
+    return isNaN(d) ? "?" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+  var dot = function (alive, cls) { return '<span class="dot ' + (alive ? "ok" : "off") + (cls || "") + '"></span>'; };
+  // orch#163: the issue-row dot, extended. Colour is still liveness alone
+  // (dot()'s job, untouched above); this ADDS the automerge fact as the
+  // rounded-square outline (.dot.auto, see the CSS comment) and makes the
+  // dot itself the toggle -- same [data-act] path every other control uses
+  // (act() at :514, delegated at :1501-1526), so it gets stopPropagation
+  // and disabled-when-CAN_ACT-false for free. `i.auto_land` is the ONLY
+  // signal read here for the VALUE -- never i.labels; precedence for
+  // automerge lives server-side in exactly one home (core.py), not
+  // duplicated here. orch#284 adds i.auto_land_source for the LABEL only:
+  // it too is computed server-side beside auto_land, so this still reads a
+  // decided answer rather than re-deriving precedence from labels.
+  var autoDot = function (i, slug) {
+    var alive = i.orch_alive, on = !!i.auto_land;
+    var cls = (alive ? "ok" : "off") + (alive ? " pulse" : "") + (on ? " auto" : "");
+    var payload = esc(JSON.stringify({ action: "set_auto_land", repo: slug, issue: i.issue, on: !on }));
+    // orch#284: the per-issue value overrides the repo default in BOTH
+    // directions (on-over-off and off-over-on), so if "inherited" and "set
+    // on the issue" rendered the same label, the operator could not tell
+    // whether flipping THIS control changes anything at all. The suffix is
+    // the tell: "(from repo)" means the dot mirrors the repo default and
+    // toggling it will set an issue-level override; "tap to toggle" means
+    // the issue already carries its own value.
+    var label = "#" + i.issue + " automerge " + (on ? "on" : "off") +
+      (i.auto_land_source === "repo" ? " (from repo)" : " — tap to toggle");
+    // actAttrs() already emits its own `title` (the disabled reason) when
+    // CAN_ACT is false; only add ours when actAttrs() gave none, so the tag
+    // never carries two title attributes. data-no-btn tells the delegated
+    // click handler to call act() with btn=null for this control -- the dot
+    // is a 7px childless span with no text to replace, so the textContent
+    // "…"/"done"/"failed"/"?" states act() writes on its button argument
+    // would spill glyphs out of the box instead (see finding 4).
+    var attrs = actAttrs();
+    var titleAttr = attrs ? "" : ' title="' + esc(label) + '"';
+    return '<span class="dot ' + cls + '" data-act=\'' + payload + '\' data-no-btn="1"' +
+      attrs + titleAttr + ' aria-label="' + esc(label) + '"></span>';
+  };
+  // activity is a unix-seconds timestamp or null; render as "Xm".
+  function mins_from_ts(ts) {
+    if (ts == null) return "—";
+    return mins(Math.round((Date.now() / 1000 - ts) / 60));
+  }
+  // Coarse duration words for the journal's synthetic gap rows. Deliberately
+  // coarse: the claim is "nothing happened for days", never a false-precision
+  // minute count on a cadence whose observation gaps reach 1000+ minutes.
+  function span(sec) {
+    if (sec == null || sec < 0) return "—";
+    var m = Math.round(sec / 60);
+    if (m < 60) return m + "m";
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + "h " + (m % 60) + "m";
+    return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  }
+
+  // A runtime error gets a named surface (#169): the console keeps it after
+  // the toast fades, the toast tells an operator who is not reading the
+  // console. Before this, act()'s catch restored the button label and dropped
+  // the cause on the floor -- a merge that failed, a nudge that 500'd and a
+  // kill that was denied all looked identical to a click that never happened
+  // (the silent-no-op class of #93/#130/#149).
+  //
+  // RUNTIME errors only. A derived condition -- a blocked repo, a stuck agent
+  // -- is state, and renders as issue state (#166). It must never toast.
+  //
+  // Never throws: a failure to report a failure must not take the page down
+  // (#66), and this runs from inside a .catch() where a second throw would be
+  // unhandled.
+  function toastErr(what, cause) {
+    var msg = String(cause == null ? "" : (cause.message || cause)) || "unknown cause";
+    try { console.error("[orch] " + what + ": " + msg, cause); } catch (e) {}
+    try {
+      var host = $("orch-toasts");
+      if (!host) return;
+      // Newest on top, and bounded: a server that is down can fail every
+      // click, and an unbounded column would bury the page it reports on.
+      while (host.children.length >= 4) host.removeChild(host.lastChild);
+      var el = document.createElement("div");
+      el.className = "toast";
+      var b = document.createElement("b");
+      b.textContent = what;
+      el.appendChild(b);
+      el.appendChild(document.createTextNode("\n" + msg));
+      el.title = "click to dismiss";
+      el.onclick = function () { if (el.parentNode) el.parentNode.removeChild(el); };
+      host.insertBefore(el, host.firstChild);
+      // Transient by construction: the dashboard keeps no state (#166), so
+      // the console is the only half that outlives the fade.
+      setTimeout(function () {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      }, 12000);
+    } catch (e) {}
+  }
+
+  // Local-only "fold this repo's issue rows" store (#160). It records what
+  // is FOLDED, not what is open. That direction matters for #66's safe-
+  // degradation rule -- a store that throws, or reads back corrupt, must
+  // degrade to the SAFE state, and the safe state here is "nothing folded",
+  // i.e. every repo expanded (the operator's ruling on #160: expanded is
+  // the default, folding is the operator's own act). Recording "open" instead
+  // would degrade the wrong way: a failed read would silently fold everything.
+  var FOLD_KEY = "orch.folded.repos";
+  function foldedSet() {
+    try {
+      var raw = localStorage.getItem(FOLD_KEY);
+      var obj = raw ? JSON.parse(raw) : {};
+      return obj && typeof obj === "object" ? obj : {};
+    } catch (e) { return {}; }
+  }
+  function foldSave(obj) {
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify(obj)); } catch (e) {}
+  }
+
+  // Returns the promise of the decoded response so a caller that needs the
+  // BODY (and not just the done/failed button text) can chain onto the same
+  // request instead of writing a second fetch. Callers that ignore the return
+  // value behave exactly as before; when CAN_ACT is false nothing is sent and
+  // a resolved promise carrying null is handed back, so a chained caller can
+  // still run its own rendering without a special case for the dead page.
+  //
+  // `sink` names where this call's output belongs. The global #out pre is
+  // CUT (section 7) -- output renders at its cause -- so a verb that produces
+  // text passes the out_text key of the block that asked for it.
+  // ---- transient button text, without dropping the accessible name -----
+  // A verb button's visible content is now a glyph in an aria-hidden span,
+  // so the old raw textContent write had two costs beyond losing the
+  // markup: it replaced the span with a bare text node (un-hiding the glyph
+  // from assistive tech for good), and it left aria-label announcing the
+  // ORIGINAL action while the button visibly read "…"/"done"/"failed". The
+  // sighted operator and the screen-reader operator saw different buttons.
+  //
+  // btnSay is the one place that writes transient text: it swaps the visible
+  // content AND moves aria-label with it, so the two can never disagree.
+  // Snapshot/restore carry innerHTML, not textContent, so the glyph comes
+  // back inside its span.
+  function btnSnapshot(b) {
+    return { html: b.innerHTML, label: b.getAttribute("aria-label") };
+  }
+  function btnSay(b, text) {
+    // Keep the pre-transient state on the element itself: act()'s catch and
+    // disarm() can both restore, and whichever runs first must find it.
+    if (!b.hasAttribute("data-was-html")) {
+      b.setAttribute("data-was-html", b.innerHTML);
+      if (b.hasAttribute("aria-label")) {
+        b.setAttribute("data-was-label", b.getAttribute("aria-label"));
+      }
+    }
+    b.textContent = text;
+    // The transient word IS the accessible name while it shows. An armed
+    // button announcing its un-armed name is the confirm step going silent.
+    if (b.hasAttribute("aria-label")) b.setAttribute("aria-label", text);
+  }
+  function btnRestore(b, snap) {
+    var html = snap && snap.html != null ? snap.html : b.getAttribute("data-was-html");
+    var label = snap && snap.label != null ? snap.label : b.getAttribute("data-was-label");
+    if (html != null) b.innerHTML = html;
+    if (label != null) b.setAttribute("aria-label", label);
+    else if (html == null) b.textContent = "?";
+    b.removeAttribute("data-was-html");
+    b.removeAttribute("data-was-label");
+  }
+  function act(body, btn, sink) {
+    if (!CAN_ACT) return Promise.resolve(null);
+    // What the toast names. The action alone is too thin to act on when two
+    // rows offer the same verb, so carry the target the payload already
+    // carries: `repo`/`issue` for the issue verbs, `path` for unwatch, `file`
+    // for tail. `tick` has no argument and is named by its verb alone.
+    var b = body || {};
+    var target = b.repo ? (b.repo + (b.issue ? " #" + b.issue : ""))
+               : (b.path || b.file || "");
+    var verb = String(b.action || "action") + (target ? " " + target : "");
+    var was = btn && btnSnapshot(btn);
+    if (btn) btnSay(btn, "…");
+    return fetch("/act", { method: "POST", body: JSON.stringify(body) })
+      // A non-JSON body is a real case, not a parse bug: a dead proxy answers
+      // 502 in HTML, and r.json() on that rejects with "Unexpected token '<'"
+      // -- a cause that names the parser instead of the server. Read the text
+      // once and report the STATUS when it will not decode.
+      .then(function (r) {
+        return r.text().then(function (t) {
+          try { return JSON.parse(t); }
+          catch (e) {
+            throw new Error("HTTP " + r.status + " " + (r.statusText || "")
+              + " (response was not JSON)");
+          }
+        });
+      })
+      .then(function (d) {
+        if (btn) btnSay(btn, d.ok ? "done" : "failed");
+        if (d.out && sink) { out_text[sink] = d.out; paintOut(sink); }
+        // A refusal is a runtime error with a cause the server already named;
+        // "failed" on a button is not that cause. Same field order as
+        // tui_act.py:58, so both clients name one failure the same way.
+        if (!d.ok) toastErr(verb, d.error || d.out || "the server refused this action");
+        setTimeout(poll, 1200);
+        return d;
+      })
+      .catch(function (e) {
+        if (btn) btnRestore(btn, was);
+        toastErr(verb, e);
+        return null;
+      });
+  }
+
+  // Paints one inline output box from out_text alone, for the same reason
+  // every other out-of-DOM store exists here: render() re-emits the box empty
+  // on the poll act() schedules 1.2s later, so a tail the operator is reading
+  // would vanish unless it is repainted from the store.
+  function paintOut(sink) {
+    var box = $("o" + sink);
+    if (box) box.textContent = out_text[sink] || "";
+  }
+  // paintOut's counterpart for the RUN LOG section (orch#151): innerHTML,
+  // not textContent, because run_log_text holds runLogBody's markup, not
+  // raw text -- every interpolated field in that markup is esc()'d at
+  // build time, same as every other innerHTML write in this file.
+  function paintRunLog(sink) {
+    var box = $("rl" + sink);
+    if (box && run_log_text.hasOwnProperty(sink)) box.innerHTML = run_log_text[sink];
+  }
+
+  // ---- routing (section 2) -------------------------------------------
+  // Three hash routes, kept not by inheritance but because they earn it in
+  // ~10 lines: deep-linking, reload-keeps-place, free back/forward.
+  //   #/            the machine page
+  //   #/<slug>      one repo
+  //   #/<slug>/<n>  one issue
+  // Anything unparseable falls back to the machine page rather than
+  // rendering a blank: a bad hash is a typo, not a state worth showing.
+  function route() {
+    var h = String(location.hash || "").replace(/^#\/?/, "");
+    if (!h) return { page: "machine" };
+    var parts = h.split("/").filter(function (p) { return p !== ""; });
+    // A slug is checked against the SAME regex the server enforces, so a
+    // hash that could never name a real repo takes the fallback instead of
+    // rendering an empty repo page that looks like a repo with no issues.
+    if (!parts.length || !SLUG_OK.test(decodeURIComponent(parts[0]))) return { page: "machine" };
+    var slug = decodeURIComponent(parts[0]);
+    if (parts.length === 1) return { page: "repo", slug: slug };
+    if (/^\d+$/.test(parts[1])) return { page: "issue", slug: slug, issue: parseInt(parts[1], 10) };
+    return { page: "repo", slug: slug };
+  }
+  function href(slug, issue) {
+    return "#/" + encodeURIComponent(slug) + (issue != null ? "/" + issue : "");
+  }
+
+  // ---- shape 3.1: the entity row --------------------------------------
+  // [mark] [identity] [status/what] [age] [verbs 0-2]. Declared variance,
+  // not per-view exceptions: mark optional, status optional, verbs 0-2.
+  // `cls` carries the weight variant (lite = secondary, loud = needs-you).
+  // `attrs` is a raw attribute string (e.g. ` data-t="rpX"`), the same
+  // mechanism sectionHead uses for its own toggle attribute -- callers that
+  // need a wrapper attribute pass it in here rather than string-patching the
+  // HTML this function returns (#160: the repo-row fold needs this).
+  function entityRow(o) {
+    // orch#289 (part 4): `sub` is an optional journal-tail line rendered as a
+    // second grid row (see .er.has-sub in the stylesheet). Absent for every
+    // existing caller, so their markup is unchanged byte-for-byte.
+    return '<div class="er' + (o.cls ? " " + o.cls : "") + (o.sub ? " has-sub" : "") + '"' + (o.attrs || "") + ">" +
+      '<span class="er-mark">' + (o.mark || "") + "</span>" +
+      '<span class="er-id">' + (o.id || "") + "</span>" +
+      '<span class="er-what">' + (o.what || "") + "</span>" +
+      '<span class="er-age">' + esc(o.age == null ? "" : o.age) + "</span>" +
+      (o.verbs ? '<span class="er-verbs">' + o.verbs + "</span>" : "") +
+      (o.sub ? '<span class="er-sub">' + o.sub + "</span>" : "") +
+      "</div>";
+  }
+
+  // ---- shape 3.2: the log row -----------------------------------------
+  // [time] [actor] [message]. Time LEADS: it is the identity of the entry.
+  // The one prose clamp for row sub-lines: PR #334 established
+  // slice-then-escape at 140 for the issue row's brief; orch#415's repo-row
+  // latest-act sub-line (repoActSub) reuses it rather than picking a second
+  // number. Caller escapes.
+  function clip(s) {
+    s = String(s == null ? "" : s);
+    return s.length > 140 ? s.slice(0, 140) + "…" : s;
+  }
+  // A journal row's human line: the event plus whatever prose the row
+  // carries. A row is {at, actor, event, ...extra}; `note`/`summary` are the
+  // extras that hold text, anything else is machine bookkeeping that does
+  // not belong in a readable line. One home, read by JOURNAL and, since
+  // orch#415, the repo row's own latest-act sub-line (repoActSub).
+  function logMsg(row) {
+    var msg = String((row && row.event) || "");
+    var extra = row && (row.summary || row.note);
+    if (extra) msg += " — " + String(extra).split("\n")[0];
+    return msg;
+  }
+  // orch#415: the issue brief sub-line, ONE home for both the repo page
+  // (issue row, ~:1660) and the machine page (repoIssueRows) so a brief can
+  // never render differently -- or disagree on `stale` -- between the two.
+  // brief is the same {text, stale} shape both pages already read
+  // (core.issue_brief); absent/empty text is an honest blank, same rule as
+  // above -- never an empty sub-line. `stale` reuses the exact badge the
+  // issue page's own brief row already uses (:CHECKING pill, see defList
+  // below) rather than inventing a second "this is old" visual language.
+  function briefSub(i) {
+    var text = i.brief && i.brief.text;
+    if (!text) return "";
+    return esc(clip(text)) +
+      (i.brief.stale ? ' <span class="s CHECKING">stale</span>' : "");
+  }
+  function logRow(time, actor, msg) {
+    return '<div class="lg"><span class="lg-time">' + esc(time) + "</span>" +
+      '<span class="lg-actor">' + esc(actor) + "</span>" +
+      '<span class="lg-msg">' + esc(msg) + "</span></div>";
+  }
+  // The gap marker: this shape's divider. Full-width, no cells, cannot break.
+  function gapRow(sec) {
+    return '<div class="lg-gap">—— ' + esc(span(sec)) + " gap — no ticks recorded ——</div>";
+  }
+
+  // ---- shape 3.3: the definition pair ---------------------------------
+  // [label] [value]. Fold-free by construction; no media query touches it.
+  function defList(pairs) {
+    return '<dl class="dl">' + pairs.map(function (p) {
+      return "<dt>" + esc(p[0]) + "</dt><dd>" + p[1] + "</dd>";
+    }).join("") + "</dl>";
+  }
+
+  // ---- shape 3.4: the section header ----------------------------------
+  // [title (count)] [controls]. Headers own the controls that govern their
+  // rows. `tid` makes the header a disclosure toggle for the block below.
+  function sectionHead(title, count, controls, cls, tid) {
+    return '<div class="sh' + (cls ? " " + cls : "") + (tid ? " toggle" : "") + '"' +
+      (tid ? ' data-t="' + esc(tid) + '"' : "") + ">" +
+      '<span class="sh-t">' + esc(title) +
+      (count == null ? "" : " (" + count + ")") + "</span>" +
+      (controls ? '<span class="sh-c">' + controls + "</span>" : "") + "</div>";
+  }
+
+  // ---- shape 3.5: furniture -------------------------------------------
+  function furniture(text, cls) {
+    return '<div class="fu' + (cls ? " " + cls : "") + '">' + text + "</div>";
+  }
+
+  // The nav bar's right-hand side: the age readout and the reload button.
+  // ONE emission site for all three pages on purpose. The reload button is
+  // the control an operator reaches for when the page itself looks wrong, so
+  // a second copy that drifts (hidden on one route, disabled on another) is
+  // the #66 failure with extra steps -- and orch/test_core.py pins this file
+  // to exactly one reload-button id line for that reason (the check counts
+  // occurrences, so do not spell the id in a comment either). `extra` is
+  // where a page slots its own controls (the repo page's nudge) first.
+  function navRight(extra) {
+    return '<span class="right"><span class="m" id="age"></span>' + (extra || "") +
+      '<button id="btn-reload" title="re-fetch the dashboard data now, instead of waiting for the next poll">reload</button></span>';
+  }
+
+  // The ONE resolution of an issue's displayed state, for every page.
+  //
+  // #87 established the rule: state and work_state are two resolutions of one
+  // fact, so one pill carries both. work_state is the finer axis and wins by
+  // default -- but it is derived from the branch and the PR alone (core.py
+  // work_state), while state is derived from labels alone (core.py
+  // issue_state), and NOTHING couples the two. So work_state cannot express
+  // UNCLAIMED or ABANDONED, and state must win for those.
+  //
+  // This lives in a function rather than inline in a row loop because the
+  // machine page, the repo page and the issue page all render a pill for the
+  // SAME issue. While the rule was inline, one zone could not reach it and
+  // used raw work_state: an issue whose PR is red (work_state BLOCKED) and
+  // whose label says agent-stuck (state ABANDONED) rendered two different
+  // colours on one screen for one issue. The rule has exactly one home.
+  function pillState(i) {
+    return (i.state === "ABANDONED" || i.state === "UNCLAIMED")
+      ? i.state : i.work_state;
+  }
+  // The repo row's count, in orch#386's words -- working · awaiting ·
+  // orphaned · stale -- replacing the old cell that counted issue ROWS
+  // and so printed 11 for 2 live sessions (the misread #386 filed; the
+  // test suite pins that the old wording is gone). One derivation with one home, called from the machine page's
+  // repo row and the repo page's header: the pillState lesson above.
+  // `stalled` (#301) stays the repo-level red dot; it is not a fifth bucket.
+  // Predicates are the spec's (DASHBOARD-2026-09-17 §4.2), on fields every
+  // issue row already carries; an issue matching none counts nowhere.
+  function bucketOf(i) {
+    if (i.orch_alive) return "working";
+    var ws = i.work_state;
+    var atPr = ws === "REVIEW" || ws === "CHECKING" || ws === "BLOCKED";
+    // orch#425: a dead owner sitting at REVIEW/CHECKING/BLOCKED with a PR
+    // read identical to a healthy merge-wait -- orch#408 sat 2.5h dead and
+    // the dashboard never showed it. Past the idle threshold (the feed's
+    // own nudge_idle_mins, section 7's NUDGE_IDLE_MINS global; -1 "unknown"
+    // fails >= on purpose) it moves from awaiting into stale. NOTE: unlike
+    // every other bucket here, this predicate is TIME-DEPENDENT -- the
+    // count can flip with no state change, purely because a clock ticked
+    // past the threshold. Flagged in review; keeping the caveat on record.
+    var deadStale = i.idle_min >= (typeof NUDGE_IDLE_MINS === "number" ? NUDGE_IDLE_MINS : 30);
+    if (i.pr && atPr && !deadStale) return "awaiting";
+    if (ws === "LANDED") return "orphaned";
+    if ((!i.pr && (ws === "CLAIMED" || ws === "ACTIVE")) || (i.pr && atPr && deadStale)) return "stale";
+    return null;
+  }
+  function repoCounts(r) {
+    var n = { working: 0, awaiting: 0, orphaned: 0, stale: 0 };
+    (r.issues || []).forEach(function (i) { var b = bucketOf(i); if (b) n[b]++; });
+    // `working` renders the feed's live_orchs -- the ledger (PR #389 ruled
+    // it the numerator), which the widget had ignored. Per-row orch_alive
+    // is the same fact seen from the row; the two should agree, and when a
+    // feed predates the field the row-derived count stands in.
+    if (typeof r.live_orchs === "number") n.working = r.live_orchs;
+    var parts = ["working", "awaiting", "orphaned", "stale"].filter(function (k) { return n[k] > 0; })
+      .map(function (k) { return n[k] + " " + k; });
+    return parts.length ? parts.join(" · ") : "idle";
+  }
+  function pill(st) {
+    return '<span class="s ' + esc(st || "UNCLAIMED") + '">' + esc(st || "UNCLAIMED") + "</span>";
+  }
+  // An issue's identity cell links to its ISSUE PAGE, not to the forge: the
+  // page is the drill-down (section 2, deep links), and the forge link is a
+  // verb on the issue page where it belongs.
+  function issueLink(slug, i) {
+    return '<a href="' + esc(href(slug, i.issue)) + '">#' + esc(i.issue) + "</a>";
+  }
+
+  // ---- verb buttons ----------------------------------------------------
+  // Every verb the pages emit goes through here so the two-tier rule (#66)
+  // is applied in one place: ALWAYS emitted, CAN_ACT decides only disabled,
+  // ACT_REASON is the title text saying why.
+  function verbTail(file, sink, id) {
+    // Always emitted, even with no log file: the operator learns this session
+    // has nothing to tail, instead of guessing why the button is missing.
+    // The session id is in the accessible name because a SESSIONS block
+    // renders one of these per row: "tail" alone would announce every row
+    // identically, which is the ambiguity the icon conversion had to avoid.
+    var label = "tail" + (id ? " " + id : "");
+    var attrs = actAttrsIf(!file, "this session has no log file to tail");
+    var titleAttr = attrs ? "" : ' title="' + esc(label) + '"';
+    return '<button data-act=\'' +
+      esc(JSON.stringify({ action: "tail", file: file || "" })) + '\'' +
+      (sink ? ' data-sink="' + esc(sink) + '"' : "") +
+      attrs + titleAttr + ' aria-label="' + esc(label) + '"><span aria-hidden="true">☰</span></button>';
+  }
+  // `log` (the run log, by ledger key) is now a real action (orch#151's
+  // server unit added it to ACTIONS). Unlike verbTail this is not
+  // session-scoped -- a run log is "all runs of this key" (design's own
+  // words), so this lives in the RUN LOG section header, not in a per-
+  // session entityRow, and it posts repo/issue rather than a file. It
+  // calls act() directly (not the generic [data-act] delegated handler)
+  // because it needs the decoded BODY to render structured rows, not just
+  // the done/failed button text act() already writes -- exactly the
+  // chained-promise use act()'s own comment (~601) anticipates.
+  function verbLog(slug, issue, sink) {
+    var label = "log #" + issue;
+    return '<button data-run-log=\'' +
+      esc(JSON.stringify({ action: "log", repo: slug, issue: issue })) +
+      '\' data-sink="' + esc(sink) + '" title="' + esc(label) + '" aria-label="' + esc(label) +
+      '"><span aria-hidden="true">≡</span></button>';
+  }
+  // The live form is an <a> styled as a button, NOT a <button> wrapped in an
+  // <a>: interactive content may not nest, so the old shape was invalid HTML
+  // and left the click target ambiguous. `.btn` carries the button styling so
+  // the two forms still look identical side by side in a verbs row.
+  function verbLink(url, label, deadReason) {
+    return url
+      ? '<a class="btn" href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + " ↗</a>"
+      : "<button disabled title=\"" + esc(deadReason) + '">' + esc(label) + " ↗</button>";
+  }
+  // orch#161: the PR is an attribute of the issue row, not a separate row --
+  // this is the one place that says so. Both list rows and needsYouVerb
+  // reach it so the dead-reason wording cannot drift between call sites.
+  function verbPR(i) {
+    return verbLink(i.pr_url, "PR",
+      i.pr ? "the feed has no URL for PR #" + i.pr : "no PR on this issue yet");
+  }
+  function verbNudge(slug) {
+    var label = "nudge " + slug;
+    var attrs = actAttrs();
+    var titleAttr = attrs ? "" : ' title="' + esc(label) + '"';
+    return '<button data-act=\'' +
+      esc(JSON.stringify({ action: "nudge", repo: slug })) + '\'' + attrs + titleAttr +
+      ' aria-label="' + esc(label) + '"><span aria-hidden="true">▲</span></button>';
+  }
+  // The review items that say "fix before merge" for one issue (#117). ONE
+  // home, read by the merge button's disabled test AND by the block that
+  // renders them on the page -- a greyed button whose cause is only in a
+  // title attribute is unreadable on a phone, and a listed finding whose
+  // button is live is worse.
+  //
+  // The items live on the feed's `awaiting` array, one entry per REVIEW unit,
+  // each carrying repo/slug/issue/pr plus `review`. `review` is
+  // core.review_items_for_pr's shape: null when no review was found at all,
+  // else {sha, items:[{n, verdict, location, finding}]} where items may be
+  // EMPTY -- "a reviewer looked and found nothing", which is not the same as
+  // "no review ran". Neither of those two blocks merge; only a present
+  // fix-before-merge verdict does.
+  function blockingFindings(d, slug, issue) {
+    var row = (d && d.awaiting || []).filter(function (w) {
+      return w.slug === slug && w.issue === issue;
+    })[0];
+    var items = row && row.review && row.review.items;
+    if (!items || !items.length) return [];
+    return items.filter(function (it) { return it.verdict === "fix-before-merge"; });
+  }
+  // The reason string, spelled once: it is both the button's hover text and
+  // the heading over the findings themselves.
+  var MERGE_BLOCKED = "a review finding says fix before merge — clear or overrule it first";
+  function verbMerge(d, slug, i) {
+    // Merge stays the operator's arm-then-confirm act. It is the one verb
+    // the design keeps pointing at GitHub for (section 5 cuts one-tap merge
+    // as a verb the tick may use), but the control the operator already has
+    // is not removed by a redesign of the page around it -- a removed control
+    // is indistinguishable from one that was never built (#66).
+    //
+    // The fix-before-merge gate is a HINT, not enforcement, exactly as it was
+    // on the awaiting row this page replaced (#117 restores it after the
+    // redesign dropped it). server.py's a_merge re-derives world state and
+    // refuses anything that is not REVIEW on this issue's own PR, but it does
+    // NOT consult the review block at all -- so nothing server-side stops a
+    // merge over a blocking finding, and this greyed button is the only thing
+    // between an operator and landing one. Deliberate: the operator can still
+    // overrule a finding, but from GitHub, with the friction that decision
+    // deserves. If a server-side gate ever lands, this stays as the cheap
+    // local echo of it, not as the enforcement.
+    var blocked = blockingFindings(d, slug, i.issue).length > 0;
+    var label = "merge PR #" + i.pr;
+    var attrs = actAttrsIf(i.pr == null || blocked,
+        i.pr == null ? "no PR yet" : MERGE_BLOCKED);
+    var titleAttr = attrs ? "" : ' title="' + esc(label) + '"';
+    return '<button class="danger" data-merge=\'' +
+      esc(JSON.stringify({ action: "merge", repo: slug, issue: i.issue, pr: i.pr })) +
+      '\' data-confirm="merge PR #' + esc(i.pr) + '?"' +
+      attrs + titleAttr + ' aria-label="' + esc(label) + '"><span aria-hidden="true">↳</span></button>';
+  }
+  function verbUnwatch(r) {
+    // The transfer-box `untrack` is stage 2 (it writes state:"off" into
+    // orch.json, which does not exist yet). `unwatch` is the action the
+    // server accepts TODAY and does the same job against repos.txt, so the
+    // TRACKED row keeps it under its real name rather than shipping a button
+    // labelled with a verb nothing implements.
+    var badPath = !SLUG_OK.test(String(r.path || "").replace(/~/g, ""));
+    var label = "unwatch " + r.repo;
+    var attrs = actAttrsIf(badPath, "this repo's path has characters the server will not accept — unwatch it from the command line instead");
+    var titleAttr = attrs ? "" : ' title="' + esc(label) + '"';
+    return '<button class="danger" data-unwatch=\'' +
+      esc(JSON.stringify({ action: "unwatch", path: r.path })) +
+      '\' data-confirm="unwatch ' + esc(r.repo) + '?"' +
+      attrs + titleAttr + ' aria-label="' + esc(label) + '"><span aria-hidden="true">⊘</span></button>';
+  }
+
+  // ==== PAGE 4.1: the machine page ======================================
+  // Order = the operator's jobs: anything for me -> my working set -> what I
+  // could add -> the edge cases. The QUIET state is designed first, because
+  // it is what the operator sees most: one furniture line, never an empty
+  // titled block.
+  function machinePage(d) {
+    var t = d.tick || {};
+    var tickAge = typeof t.minutes_since_last === "number" && t.minutes_since_last >= 0
+      ? "tick " + mins(t.minutes_since_last) + " ago" : "tick never run";
+    var out = '<div class="nav"><span class="t">orch</span>' +
+      '<span class="m">' + esc(tickAge) + "</span>" + navRight() + "</div>";
+
+    // The NEEDS YOU slice is CUT (issue #150): the machine page shows the
+    // work itself now, nested under its repo, so a counter pointing at that
+    // same work adds a layer without adding a fact. What survives here is
+    // only the slug-less, machine-scope alerts -- see machineAlerts below.
+    out += machineAlerts(d);
+
+    // TRACKED is the PRIMARY section: the working set is the page's subject.
+    // #259: feed.py ships r.state ("tracked" | "off") per repo, and a paused
+    // ("off") repo belongs under AVAILABLE, not here. A MISSING state (any
+    // feed predating this field, or a row that omits the key) must stay
+    // TRACKED -- so the test is `=== "off"`, never a truthy/falsy check on
+    // `state`, which would silently drop an undefined-state repo into
+    // AVAILABLE.
+    var allRepos = d.repos || [];
+    var repos = allRepos.filter(function (r) { return r.state !== "off"; });
+    var pausedRepos = allRepos.filter(function (r) { return r.state === "off"; });
+    out += sectionHead("tracked", repos.length, "", "primary");
+    if (!repos.length) {
+      out += furniture("no repos tracked — watch one from the command line (`orch watch <path>`)", "hint");
+    }
+    repos.forEach(function (r) {
+      // #160: the repo row is the fold control for its own nested issue
+      // rows below it. foldId(), NOT idsafe() -- idsafe() is lossy (see its
+      // own comment above) and a lossy id here means two repo rows sharing
+      // one DOM id, not just a wrong map key, so the fold gets its own
+      // injective builder. Default is EXPANDED (operator ruling on #160): a
+      // repo is open unless `open` says otherwise, and `open` was seeded
+      // from FOLD_KEY (what's folded) before this render, never from an
+      // "is open" store.
+      var fid = foldId(r.slug);
+      out += repoRow(r, d, fid);
+      out += '<div class="det' + (open[fid] === false ? "" : " on") + '" id="' + esc(fid) + '">' +
+        repoIssueRows(r, d) + "</div>";
+    });
+
+    // AVAILABLE is SECONDARY: visible, because the transfer box needs both
+    // lists on screen, but visually lighter. Its discovery list (new repos
+    // nobody has watched yet) needs GET /repos.json, which is stage 2 -- but
+    // #259 gives it real content today: a paused repo is already "available"
+    // in the sense that operates here, so it renders as a genuine row via
+    // repoRow(), same identity/path/verbs as a TRACKED row, `.det` fold
+    // omitted (a paused repo carries issues: [], so there is nothing to
+    // fold -- an empty `.det` would be a fold control for a block that is
+    // always empty). The discovery hint only claims what is still unbuilt
+    // (finding new repos), never "nothing to list" once paused rows exist.
+    out += sectionHead("available", pausedRepos.length ? pausedRepos.length : null,
+      "<button" + stageTwoAttrs("+ add path") + ">+ add path</button>" +
+      "<button" + stageTwoAttrs("+ add URL") + ">+ add URL</button>");
+    pausedRepos.forEach(function (r) {
+      out += repoRow(r, d, null);
+      // note (feed.py: "paused, CI broken" etc.) uses the same .note block
+      // the merge-blocker findings use (#117) -- established prose treatment
+      // for agent/operator-authored text, not a new shape.
+      if (r.note) out += '<div class="note">' + esc(r.note) + "</div>";
+    });
+    out += furniture(pausedRepos.length
+      ? "repo discovery lands in stage 2 (GET /repos.json) — finding new repos is not built yet"
+      : "repo discovery lands in stage 2 (GET /repos.json) — nothing to list yet", "hint");
+
+    // Other sessions: reference, collapsed behind its count, capped at 5.
+    // unattached_total is the true pre-trim count (the bake step ships only
+    // 5 entries); fall back to un.length so this still works against a raw,
+    // untrimmed status.json (TUI / direct viewer).
+    var un = d.unattached_sessions || [];
+    var unTotal = (typeof d.unattached_total === "number") ? d.unattached_total : un.length;
+    out += sectionHead("other sessions on this machine", unTotal, "", null, "dun");
+    out += '<div class="det" id="dun">' + otherSessions(un, unTotal) + "</div>";
+
+    out += machineFooter(d);
+    return out;
+  }
+
+  // The machine-scope alert strip (issue #150). Slug-less alerts name no
+  // repo -- tick stale (feed.py:719), dashboard-op-hung (feed.py:742),
+  // deploy-behind (feed.py:751) -- so they cannot nest under a repo row and
+  // render here instead, directly under the nav line that already carries
+  // machine-scope facts. Slug-carrying alerts nest under their repo via
+  // repoIssueRows and never reach this function.
+  //
+  // Deliberately NOT a general alerts strip: it holds only slug-less alerts,
+  // at most 3, normally 0. Do not widen the filter below to admit alerts
+  // that carry a slug -- those belong under their repo.
+  function machineAlerts(d) {
+    return needsYouRows(d, function (a) { return !a.slug; }).list.join("");
+  }
+
+  // A TRACKED row is an entity row: counts only, never health words. The
+  // repoCounts() cell is four COUNTS in #386's vocabulary; aggregation is
+  // counting, judgement is concluding, and this page never concludes. The needs-you count is CUT (#150): the
+  // repo's alerts and issues now render as nested rows right below,
+  // so a count here would be a second, redundant answer to the same
+  // question repoIssueRows already shows in full.
+  // `fid` (#160) is the id of the .det block holding this repo's nested
+  // issue rows -- present only on the reachable path, since an unreachable
+  // repo (below) renders no issues and so has nothing to fold.
+  // orch#415: the repo row's own latest-act sub-line -- the live-row
+  // feature's repo altitude (DASHBOARD-2026-09-17 §11.1). `orch.recent` is
+  // acts only (heartbeat already filtered server-side, feed.py
+  // repo_orch_json), newest last, so [-1] is the newest. 8 of 13 live repos
+  // carry `recent: []` -- honest blank, same rule as the issue brief below,
+  // never an empty sub-line. `at` is an offset ISO string ("...-04:00"), NOT
+  // unix seconds, so mins_from_ts() (built for the latter) does not apply;
+  // Date.parse() is the same approach tapeRows once sorted by (removed,
+  // §11), reused here for age. An unparseable `at` renders the message
+  // alone rather than a "NaN" age.
+  function repoActSub(r) {
+    var recent = (r.orch && r.orch.recent) || [];
+    if (!recent.length) return "";
+    var act = recent[recent.length - 1];
+    var msg = clip(logMsg(act));
+    if (!msg) return "";
+    var ms = act.at ? Date.parse(act.at) : NaN;
+    var ageStr = ms ? mins(Math.round((Date.now() - ms) / 60000)) + " ago" : "";
+    return esc(msg) + (ageStr ? ' <span class="dim">· ' + esc(ageStr) + "</span>" : "");
+  }
+
+  function repoRow(r, d, fid) {
+    if (!r.ok) {
+      return entityRow({
+        mark: '<span class="dot bad"></span>',
+        id: esc(r.repo),
+        what: '<span class="lvl-error">unreachable — the feed could not read this repo</span>'
+      });
+    }
+    var issues = r.issues || [];
+    var orch = r.orch || {};
+    // The disclosure glyph (#160 review finding 4): cursor: pointer alone is
+    // not a visible fold state, and an idle repo (no issues) looks identical
+    // folded or open, so a click on it appears to do nothing. `open[fid] ===
+    // false` is the same test the .det block below uses to decide its own
+    // "on" class, so the glyph and the block it controls can never disagree.
+    // Lives in er-mark alongside the live dot (not a new grid cell -- the
+    // .er grid at ~line 104 has none to spare, and the 390px fold at ~line
+    // 134 does not touch er-mark either way).
+    // No fid means no .det block to fold (#259: an AVAILABLE/paused repo
+    // carries issues: [], so nothing nests under it). The glyph and the
+    // toggle class are BOTH gated on fid for the reason this comment gives
+    // above: a row that shows a disclosure arrow and a pointer cursor but
+    // has no data-t attracts a click that wire() never listens for, which
+    // is the same "click appears to do nothing" failure in a new place.
+    var foldMark = fid
+      ? '<span class="fold-mark">' + (open[fid] === false ? "▸" : "▾") + "</span>"
+      : "";
+    // orch#301: stalled reuses .bad (same red as the !r.ok dot above) --
+    // colour means "operator attention" either way, so one class covers
+    // both. The wording is what has to stay distinguishable: !r.ok is the
+    // feed failing to read the repo; this is a repo read fine that has
+    // simply stopped moving. Title-only (hover), no new row/section/alert
+    // (orch#150, orch#291).
+    var stallWhy = r.stalled
+      ? "stalled — open issues, no live orch, " +
+        (r.stalled_since == null
+          ? "nothing recorded yet"
+          : "quiet for " + mins_from_ts(r.stalled_since))
+      : "";
+    // aria-label as well as title: the colour carries the signal for a
+    // sighted operator and the title covers hover, but neither reaches a
+    // screen reader -- same pairing the automerge dot uses.
+    var stallMark = r.stalled
+      ? '<span class="dot bad" title="' + esc(stallWhy) +
+        '" aria-label="' + esc(stallWhy) + '"></span>'
+      : "";
+    return entityRow({
+      // toggle: cursor affordance, same class sectionHead's disclosure rows
+      // use (#160). The [data-t] handler (wire()) already ignores clicks
+      // whose target is an A or BUTTON, so the nested "repo ›" link and the
+      // verb buttons below keep working -- see also the anchor's own
+      // stopPropagation, belt-and-suspenders for the same reason (#160).
+      cls: fid ? "repo toggle" : "repo",
+      attrs: fid ? ' data-t="' + esc(fid) + '"' : "",
+      mark: foldMark + dot(orch.alive, orch.alive ? " pulse" : "") + stallMark,
+      id: '<a href="' + esc(href(r.slug)) + '" onclick="event.stopPropagation()">' + esc(r.repo) + " ›</a>",
+      what: esc(repoCounts(r)) +
+            ' <span class="k2">' + esc(r.path || "") + "</span>" +
+            // orch#284: per-issue automerge is the dot on each row below.
+            // The repo DEFAULT is now readable (feed's `auto_land` on the
+            // repo object), so it is rendered for real -- but disabled,
+            // because nothing in orch writes orch.json's auto-land key yet;
+            // that write path is orch#230's ground, not this one. Named with the true
+            // blocker (a config writer, not "not built") so the operator
+            // does not think the display itself is missing.
+            ' <span class="m disabled" title="automerge ' + (r.auto_land ? "on" : "off") +
+              ' (repo default) — read-only: changing it needs a config writer (orch#230)">repo default: automerge ' +
+              (r.auto_land ? "on" : "off") + "</span>",
+      age: "",
+      verbs: verbNudge(r.slug) + verbUnwatch(r),
+      sub: repoActSub(r)
+    });
+  }
+
+  // The rows nested under a repo (issue #150): first that repo's own alerts
+  // (loud, same shape as before), then each of its
+  // issues at a second indent. This is where the cut NEEDS YOU count's
+  // detail moved to -- the repo row above states the counts (repoCounts),
+  // this renders the rows behind them.
+  //
+  // THE PREDICATE IS `issue == null`, and that is the whole of #166.
+  //
+  // This function used to render every slug-carrying alert as its own row,
+  // then every issue. feed.py gives SIX kinds both a slug and an `issue`
+  // (contended, wedged, waiting-on-merge, abandoned, died-before-starting,
+  // still-running-after-pr), so an issue carrying two of them became THREE
+  // rows: one per alert, plus its own. Measured on the live feed, orch#132
+  // did exactly that.
+  //
+  // The operator's ruling: "Alerts are not objects. The page renders repos
+  // and issues, nothing else." An alert naming an issue is a FACT ABOUT that
+  // issue, not a sibling of it -- and it is a fact the issue row already
+  // carries, because feed.py derives both from the same fields pillState
+  // reads. Rendering it twice is the pillState failure (see the comment at
+  // the top of this file) promoted to a row: one screen, two shapes for one
+  // fact, free to disagree.
+  //
+  // So an alert WITH an `issue` renders no row at all. Its issue's row is the
+  // one row, and #163's automerge toggle hangs on exactly one of them.
+  //
+  // An alert with a slug but NO `issue` names no issue, so it duplicates
+  // nothing and stays -- dropping it would take the operator's only route to
+  // the note with it (#93, #66). It keeps
+  // `cls: "loud"`, which is what tells it apart from an issue row.
+  //
+  // RENDERING ONLY. feed.py is untouched: tick.py:130-135 counts `error`
+  // alerts into the wake gate, so removing them from the feed would silently
+  // change when orch wakes.
+  function repoIssueRows(r, d) {
+    if (!r.ok) return "";
+    var out = needsYouRows(d, function (a) {
+      return !!a.slug && a.slug === r.slug && a.issue == null;
+    }, true).list.join("");
+    (r.issues || []).forEach(function (i) {
+      var st = pillState(i);
+      out += entityRow({
+        cls: "nest",
+        mark: autoDot(i, r.slug),
+        id: issueLink(r.slug, i),
+        what: pill(st) + " " + esc(i.title || "(untitled)"),
+        age: mins_from_ts(i.activity),
+        verbs: verbPR(i),
+        // orch#415 (DASHBOARD-2026-09-17 §11.1): the machine page is the
+        // page an operator watches, and it rendered no brief at all until
+        // this -- the repo page had the only copy. briefSub() is the same
+        // helper the repo page uses, so the two can never disagree.
+        sub: briefSub(i)
+      });
+    });
+    return out;
+  }
+
+  // The unattached-transcript scan: still the answer to "where work goes
+  // missing". Capped at 5 shown, the rest behind a "+N more" count.
+  function otherSessions(un, total) {
+    if (typeof total !== "number") total = un.length;
+    if (!un.length) return furniture("no unattached sessions", "hint");
+    var body = un.slice(0, 5).map(function (u) {
+      return entityRow({
+        cls: "lite",
+        id: '<span class="k2">' + esc(u.path || u.project || "?") + "</span>",
+        what: esc(u.id || ""),
+        age: mins(u.idle_min)
+      });
+    }).join("");
+    if (total > 5) body += furniture("+" + (total - 5) + " more", "hint");
+    return body;
+  }
+
+  // The footer: [tick now], the dashboard-op dot, disk %. The ledger section
+  // is CUT (section 7) -- it duplicated liveness the pages already show --
+  // and dashboard-op survives as exactly this dot. Host `load` is cut; disk
+  // stays.
+  function machineFooter(d) {
+    var h = d.host || {}, dop = d.dashboard_op || null;
+    var tickAttrs = actAttrs();
+    return '<div class="foot">' +
+      '<button data-act=\'' + esc(JSON.stringify({ action: "tick" })) + '\'' +
+      tickAttrs +
+      tipAttrs("run one orch tick immediately, instead of waiting for the scheduled one", !tickAttrs) +
+      ">tick now</button>" +
+      '<span class="right">' +
+      '<span title="' + esc(dop ? "dashboard-op " + (dop.alive ? "alive" : "idle") +
+        " · " + (dop.prior_runs || 0) + " prior runs" : "no dashboard-op on record") + '">' +
+      dot(dop && dop.alive) + " dop</span>" +
+      '<span>disk ' + esc(h.disk || "—") + "</span></span></div>";
+  }
+
+  // ---- NEEDS YOU rows (section 4.1's taxonomy) -------------------------
+  // Rows are computed FEED-side: the alerts array now carries structured
+  // fields (kind/slug/repo/issue/what/age_min/verb, plus pr/pr_url where
+  // relevant) so this renders a ROW instead of re-parsing an English
+  // sentence back into fields. Rows WITHOUT a `kind` -- the machine-level
+  // alerts (tick stale, oracle) -- have no structure to render,
+  // so they fall back to `msg` verbatim rather than being dropped.
+  //
+  // THE needs-you predicate, with exactly one home (#117) -- and that home is
+  // the FEED, not this file. `a.needs_you` is set by feed.py's alerts builder
+  // for every row in 4.1's taxonomy; this reads the flag and derives nothing.
+  //
+  // What was here before was `a.level === "error" || a.level === "warn"`, and
+  // it was wrong twice over. It dropped "wedged" and "waiting on merge" --
+  // both deliberately `info`, because `level` decides what the wake digest
+  // folds in and neither should wake anyone -- so the ordinary "your PR is
+  // green and waiting for you to merge" case, one of the two rows in 4.1's
+  // own artboard, rendered as "✓ nothing needs you". And it kept alerts that
+  // name no unit of work at all ("gh read failed") purely for being `error`.
+  // Membership in NEEDS YOU and severity are two different axes; see the long
+  // comment on feed.py's alerts builder for why they must stay two.
+  //
+  // It was also a SECOND home for the rule: repoRow counted a repo's
+  // needs-you rows with no level filter at all, ten lines from a list that
+  // filtered to error+warn, so one screen carried two answers for one repo.
+  // That is exactly the failure pillState records above. Both call sites now
+  // go through here.
+  function isNeedsYou(a) {
+    return !!(a && a.needs_you);
+  }
+  // `extra`, added for #150's split (machine strip vs. per-repo nesting),
+  // narrows WHICH needs-you alerts this call renders -- machineAlerts passes
+  // "no slug", repoIssueRows passes "this repo's alerts".
+  // `nested` indents the rows one level -- true for a repo's own alerts,
+  // false for the machine-scope strip. See needsYouRow.
+  function needsYouRows(d, extra, nested) {
+    var alerts = d.alerts || [];
+    var mine = alerts.filter(isNeedsYou);
+    if (extra) mine = mine.filter(extra);
+    return { list: mine.map(function (a) { return needsYouRow(a, nested); }) };
+  }
+
+  // One needs-you row. An anomaly is a ROW whose status cell is loud -- the
+  // card taxonomy survives intact as row vocabulary, the bespoke card layout
+  // died into the entity-row shape (section 2/3.1).
+  //
+  // `nested` (#150) adds the same one-level inset the nested issue rows use.
+  // A repo's alerts sit WITH that repo's issues, so they take the indent;
+  // the machine-scope strip sits under the header at indent 0 and does not.
+  // Same row shape either way -- only the inset differs, so 3.1's fold rule
+  // still applies unchanged.
+  function needsYouRow(a, nested) {
+    var extraCls = nested ? " nest" : "";
+    var lvl = a.level === "error" ? "lvl-error" : a.level === "warn" ? "lvl-warn" : "lvl-info";
+    var mark = '<span class="' + lvl + '">●</span>';
+    // No `kind`: a machine-level alert (tick stale, oracle). Names no issue
+    // in structured form, so the row IS its msg.
+    if (!a.kind) {
+      var collapsed = a.msg || "";
+      // #166: nested, this row sits inside a section already headed with the
+      // repo name, so repeating it is the "lists the repo twice" the operator
+      // reported. Unnested (machineAlerts) the repo name is the only thing
+      // identifying it, so it stays.
+      return entityRow({
+        cls: "loud" + extraCls, mark: mark,
+        id: !a.slug ? ""
+          : '<a href="' + esc(href(a.slug)) + '">' + esc(a.slug) + "</a>",
+        what: esc(collapsed),
+        age: a.at ? clock(a.at) : "",
+        verbs: ""
+      });
+    }
+    var kindText = {
+      "contended": "contended",
+      "wedged": "wedged",
+      "waiting-on-merge": "waiting on merge",
+      "abandoned": "abandoned",
+      "died-before-starting": "died before starting",
+      "still-running-after-pr": "still running after PR"
+    }[a.kind] || a.kind;
+    // The what-line: the condition, then the taxonomy's what-line text.
+    // `what` may legitimately be empty -- the abandoned row's what-line is
+    // "—" in the taxonomy because the journal holds the why -- so an empty
+    // string renders as the condition alone, never as a filler sentence.
+    var what = '<span class="' + lvl + '">' + esc(kindText) + "</span>" +
+               (a.what ? " · " + esc(a.what) : "");
+    // #166: nested rows drop the repo prefix -- `#132`, not `orch #132`, since
+    // the section header above already carries the repo name. As of #166 an
+    // alert carrying an `issue` renders no nested row at all (repoIssueRows
+    // filters it out, because its issue's own row is the one row), so this
+    // branch is reached unnested today. The nested form is kept correct
+    // anyway: a future caller passing `nested` must not reintroduce the
+    // doubled repo name this issue removed.
+    return entityRow({
+      cls: "loud" + extraCls, mark: mark,
+      id: (a.slug && a.issue != null
+        ? '<a href="' + esc(href(a.slug, a.issue)) + '">' +
+          (nested ? "" : esc(a.slug) + " ") + "#" + esc(a.issue) + "</a>"
+        : esc(a.repo || a.slug || "")),
+      what: what,
+      age: mins(a.age_min),
+      verbs: needsYouVerb(a)
+    });
+  }
+
+  // The taxonomy's verbs column, mapped onto real controls. `verb` is what
+  // feed.py set; anything unrecognised gets the issue link, which is the one
+  // target that always exists.
+  function needsYouVerb(a) {
+    if (a.verb === "pr") return verbPR(a);
+    // `log` and `tail` both have nowhere to render here. `tail` has no file
+    // to name: the taxonomy's "still running after PR" row points at a
+    // session, and the alert carries no file path. `log` knows its issue,
+    // but the RUN LOG section and the element it paints into live on the
+    // issue page, and an alert row has no sink -- a button here would post
+    // and then discard what came back. Both link to the issue instead,
+    // where the real controls are.
+    if (a.verb === "log" || a.verb === "tail") return verbLink(a.url, "issue", "this alert carries no issue URL");
+    return verbLink(a.url, "issue", "this alert carries no issue URL");
+  }
+
+  // ==== PAGE 4.2: the repo page =========================================
+  // Order: WHAT MOVED -> ACTIVE -> INACTIVE -> JOURNAL. Live work first,
+  // then membership, then history. ACTIVE is primary.
+  function repoPage(d, slug) {
+    var r = (d.repos || []).filter(function (x) { return x.slug === slug; })[0];
+    var out = '<div class="nav"><a href="#/">‹ orch</a>' +
+      '<span class="t">' + esc(r ? r.repo : slug) + "</span>";
+    // orch#116: emitted for any repo the feed knows, INCLUDING !r.ok --
+    // "which checkout is this?" is most worth answering precisely when the
+    // repo is unreachable and a stale or moved path is the likely cause.
+    if (r && r.path) {
+      out += '<span class="rpath" title="checkout path on this machine">' +
+             esc(r.path) + "</span>";
+    }
+    if (r && r.ok) {
+      out += '<span class="m">' + esc(repoCounts(r)) + "</span>" +
+             // orch#284: per-issue automerge lives on each row's dot below;
+             // the repo default is now shown for real (see repoRow's comment
+             // at :1349 for why it is disabled).
+             '<span class="m disabled" title="automerge ' + (r.auto_land ? "on" : "off") +
+               ' (repo default) — read-only: changing it needs a config writer (orch#230)">repo default: automerge ' +
+               (r.auto_land ? "on" : "off") + "</span>";
+    }
+    out += navRight(r ? verbNudge(r.slug) : "") + "</div>";
+    if (!r) {
+      return out + furniture("no repo named " + esc(slug) + " in this feed — it may have been unwatched", "hint");
+    }
+    if (!r.ok) {
+      return out + furniture("this repo is unreachable — the feed could not read it", "cond");
+    }
+
+    // WHAT MOVED is furniture at rest: a header, a [generate] button, and the
+    // cached table only if one exists. It NEVER renders as an empty block.
+    // Generation is the one deliberate model call in the design and lands in
+    // stage 2, so the button is emitted disabled with that reason.
+    out += sectionHead("what moved", null,
+      "<button" + stageTwoAttrs("generate a WHAT MOVED digest") + ">generate</button>");
+    out += furniture("no digest generated — the summary verb lands in stage 2", "hint");
+
+    // ACTIVE: primary. Quiet state -> the furniture line, never an empty
+    // titled block, and INACTIVE effectively becomes the primary section
+    // because membership is then the job the visit is for.
+    var issues = r.issues || [];
+    out += sectionHead("active", issues.length, "", "primary");
+    if (!issues.length) {
+      out += furniture("nothing active — activate an issue below", "hint");
+    }
+    issues.forEach(function (i) {
+      var st = pillState(i);
+      // orch#289 (part 3): display_name is a short name shown ALONGSIDE the
+      // full title, never instead of it -- the operator explicitly rejected
+      // replacing the title. Empty/absent display_name renders exactly what
+      // rendered before this unit (title alone), no invented fallback.
+      var titleHtml = esc(i.title || "(untitled)");
+      var nameHtml = i.display_name ?
+        "<b" +
+          (i.name_stale ? ' title="stored title drifted from the live title"' : "") +
+          ">" + esc(i.display_name) + "</b> " +
+          '<span class="dim">' + titleHtml + "</span>" :
+        titleHtml;
+      // Part 4: the journal-tail sub-line, via the shared briefSub() helper
+      // (orch#415) so this and the machine page's repoIssueRows render one
+      // brief identically -- see briefSub's own comment.
+      out += entityRow({
+        mark: autoDot(i, slug),
+        id: issueLink(slug, i) + " ›",
+        what: pill(st) + " " + nameHtml,
+        age: mins_from_ts(i.activity),
+        // orch#358: the operator's verb set here is PR only -- kill left the
+        // dashboard for the terminal (`spawn.py kill`).
+        verbs: verbPR(i),
+        sub: briefSub(i)
+      });
+    });
+
+    // INACTIVE: orch#284. There is no /issues.json endpoint and this does
+    // NOT fetch one -- `unconsidered` is a REPO-LEVEL fact the feed already
+    // ships (feed.py repo_json): open issue NUMBERS that are neither
+    // claimed nor covered, i.e. exactly "not being worked", which is what
+    // this section means by inactive. It is numbers only, no title/state,
+    // so the row renders honestly with just the number -- no invented text.
+    // The stage-2 buttons stay disabled: adding/loading MORE issues than the
+    // feed already names is still a write path nothing serves yet.
+    var unconsidered = r.unconsidered || [];
+    out += sectionHead("inactive", unconsidered.length,
+      "<button" + stageTwoAttrs("+ add issue") + ">+ add issue</button>" +
+      "<button" + stageTwoAttrs("load all open issues") + ">load all open issues</button>");
+    if (!unconsidered.length) {
+      out += furniture("nothing inactive — every open issue is already being considered", "hint");
+    }
+    unconsidered.forEach(function (n) {
+      out += entityRow({
+        id: '<a href="' + esc(href(slug, n)) + '">#' + esc(n) + "</a>",
+        what: ""
+      });
+    });
+
+    // JOURNAL: the event log, rendered for the first time. `orch.recent` has
+    // shipped in the feed since before this page existed and was rendered
+    // nowhere. Reference at rest -- the last few entries -- expanding when
+    // the operator is tracing, which is exactly when they ask for more.
+    var recent = (r.orch || {}).recent || [];
+    out += sectionHead("journal", recent.length,
+      "<button" + stageTwoAttrs("load earlier journal entries") + ">load earlier</button>");
+    out += journalBody(recent);
+    // The note box: `ask` as a plain journal append (section 5) -- typing
+    // here is not a launch, just an attributed line for the repo-orch to
+    // read on its next wake. Rides the generic [data-reply] handler in wire()
+    // with zero new JS: the payload just names its own `action`. It is now
+    // that handler's only emitter -- #291 removed the QUESTIONS section and
+    // with it `replyBox`, which is what the handler originally shipped for --
+    // so the handler stays for this box's sake. One box per rendered repo
+    // page, so a fixed id is safe: there is only ever one #note-input in the
+    // DOM at a time for getElementById to find.
+    var notePayload = { action: "ask", repo: slug, input: "note-input" };
+    var noteAttrs = actAttrs();
+    out += furniture('<input type="text" id="note-input" placeholder="leave note…"' +
+      noteAttrs + '><button data-reply=\'' + esc(JSON.stringify(notePayload)) +
+      '\'' + noteAttrs +
+      tipAttrs("append the typed text to this repo's journal, read on its next wake", !noteAttrs) +
+      ">send</button>");
+    out += furniture("the note is read on the next wake; [nudge] above wakes one now", "hint");
+    return out;
+  }
+
+  // The journal, as log rows with SYNTHETIC GAP ROWS between them. The gaps
+  // are derived HERE, at render time, from the delta between consecutive
+  // entries -- nothing stores them. This is what makes downtime and idleness
+  // distinguishable, the one thing git could not show.
+  function journalBody(rows) {
+    if (!rows.length) {
+      return furniture("no journal entries — this repo's orch has not written one yet", "hint");
+    }
+    // A gap shorter than this is just the normal tick cadence and marking it
+    // would bury the real gaps in noise. Derived from the feed's own idle
+    // threshold rather than a second hardcoded number (section 7 cuts the
+    // hardcoded 25): a gap only counts as one once it exceeds the interval
+    // the system itself calls idle. No threshold in the feed -> no gap rows,
+    // rather than a guess.
+    var floor = typeof NUDGE_IDLE_MINS === "number" && NUDGE_IDLE_MINS > 0
+      ? NUDGE_IDLE_MINS * 60 : null;
+    var out = "", prev = null;
+    rows.forEach(function (row) {
+      var at = row && row.at ? Date.parse(row.at) : NaN;
+      var t = isNaN(at) ? null : at / 1000;
+      if (floor !== null && prev !== null && t !== null && t - prev >= floor) {
+        out += gapRow(t - prev);
+      }
+      if (t !== null) prev = t;
+      out += logRow(clock(row && row.at), (row && row.actor) || "?", logMsg(row));
+    });
+    return out;
+  }
+
+  // The run log's body: a_log's `runs` array (orch#151), newest run first,
+  // rows chronological within a run -- see server.py:a_log. RUN BOUNDARIES
+  // MUST STAY VISIBLE ("all runs of this key" is the whole point, not one
+  // flat stream), so each run opens with a gapRow-shaped banner carrying its
+  // start time + pgid, reusing 3.2's own divider shape rather than inventing
+  // a second one. Rows reuse logRow: kind is the actor column (it names WHO
+  // /WHAT acted, same role journalBody gives `actor`), body is the message.
+  // A non-null status (ok/ERR -- the tool-result signal) is appended as a
+  // bracketed suffix on the message, since .lg has no fourth cell to spend
+  // on it and a bolted-on column would break the fold media query 3.2 owns.
+  // logRow() escapes its whole `msg` argument as plain text, so it cannot
+  // carry the status span's markup -- build that one row by hand instead,
+  // still escaping every interpolated field with esc(). ERR gets the file's
+  // existing bad-state red (#ff7b72, the .BLOCKED/.ABANDONED colour); ok
+  // gets the existing good-state green (#3fb950, the .dot.ok colour) --
+  // both ad-hoc inline styles, matching this file's one other such marker
+  // (runLogBody has no third severity to invent a palette for).
+  function runLogBody(runs) {
+    if (!runs || !runs.length) {
+      return furniture("no run log on record for this issue", "hint");
+    }
+    var out = "";
+    runs.forEach(function (run) {
+      var started = run && run.started ? clock(run.started) : "?";
+      var pgid = run && run.pgid ? "pgid=" + run.pgid : "pgid ?";
+      // Not gapRow(): that formats its argument through span(), a duration
+      // helper, so a run banner would render as "NaNm gap" and lose the
+      // start time and pgid entirely. This divider is what makes "all runs
+      // of this key" legible as several runs rather than one flat stream.
+      out += '<div class="lg-gap">—— run ' + esc(started) + " · " + esc(pgid) +
+        (run && run.caveman ? " · caveman" : "") + " ——</div>";
+      (run && run.rows || []).forEach(function (row) {
+        var time = (row && row.time) || "?";
+        var kind = (row && row.kind) || "?";
+        var body = String((row && row.body) || "");
+        var status = row && row.status;
+        if (!status) { out += logRow(time, kind, body); return; }
+        var bad = status === "ERR";
+        out += '<div class="lg"><span class="lg-time">' + esc(time) + "</span>" +
+          '<span class="lg-actor">' + esc(kind) + "</span>" +
+          '<span class="lg-msg">' + esc(body) +
+          ' <span style="color:' + (bad ? "#ff7b72" : "#3fb950") + '">[' + esc(status) + "]</span></span></div>";
+      });
+    });
+    return out;
+  }
+
+  // ==== PAGE 4.3: the issue page ========================================
+  // A DETAIL page, not a list. Six blocks: title, condition line, STATE as
+  // a definition list, ACTIONS, SESSIONS, RUN LOG.
+  function issuePage(d, slug, num) {
+    var r = (d.repos || []).filter(function (x) { return x.slug === slug; })[0];
+    var i = r && (r.issues || []).filter(function (x) { return x.issue === num; })[0];
+    var out = '<div class="nav"><a href="' + esc(href(slug)) + '">‹ ' + esc(slug) + "</a>" +
+      '<span class="t">#' + esc(num) + "</span>";
+    if (i) {
+      out += '<span class="t" style="font-weight:500">' + esc(i.title || "(untitled)") + "</span>" +
+        // orch#284: the design artboard puts the automerge toggle in the
+        // header next to the title, not only in the STATE deflist below.
+        // Reuse autoDot -- same control, same payload -- so the header copy
+        // and the deflist copy can never drift into two different toggles.
+        autoDot(i, slug) +
+        // 1. TITLE BLOCK -- identity + state pills: "what is this".
+        // Both axes, because they are two resolutions of one fact and the
+        // page is where an operator reads the whole fact. The compact row
+        // pill resolves via pillState(); this page deliberately does not,
+        // because a detail page that showed the list's resolution would add
+        // nothing to the list it drilled in from.
+        //
+        // Each pill is LABELLED with the axis it answers. The two axes are
+        // independent by construction -- issue_state reads labels alone,
+        // work_state reads the branch and PR alone (core.py) -- so they can
+        // legitimately disagree, and a stale branch alone is enough: an
+        // unclaimed issue with a leftover issue-<n> branch sits at
+        // state=UNCLAIMED work_state=CLAIMED indefinitely (observed on
+        // ops-console#42, no session, no claim pending). Printed bare as
+        // "UNCLAIMED · CLAIMED" that reads as one answer contradicting
+        // itself; labelled, it reads as the two different questions it is.
+        // The TUI renders the same pair labelled for the same reason
+        // (tui_model.py _issue_facts).
+        '<span class="m">issue ' + pill(i.state) + " · work " + pill(i.work_state) + "</span>";
+    }
+    out += navRight() + "</div>";
+    if (!i) {
+      return out + furniture("issue #" + esc(num) + " is not in this feed — it may have landed, " +
+        "or the repo may no longer be watched", "hint");
+    }
+
+    // 2. CONDITION LINE -- furniture, exceptional state ONLY. The same
+    // needs-you vocabulary as the machine page, one loud line under the
+    // title. Absent when nothing is wrong: the common state has no banner.
+    (d.alerts || []).forEach(function (a) {
+      if (a.slug !== slug || a.issue !== num) return;
+      out += furniture(esc(a.msg || a.kind || ""), "cond");
+    });
+
+    // 3. STATE -- a definition list (3.3) at primary weight. A definition
+    // list, NOT rows: rendering label->value pairs as entity rows made "a
+    // form pretending to be a table".
+    out += sectionHead("state", null, "", "primary");
+    var pairs = [
+      ["branch", esc(i.branch || "—") + " · " + commits(i.commits) + " commits · idle " + mins(i.idle_min)],
+      ["PR", (i.pr == null ? "none"
+        // orch#68: gate on the URL, not the number -- a null pr_url with a
+        // truthy pr previously rendered an anchor with an empty href, which
+        // reloaded the page instead of navigating when clicked.
+        : i.pr_url ? '<a href="' + esc(i.pr_url) + '" target="_blank" rel="noopener">#' + esc(i.pr) + " ↗</a>"
+        : '<span class="disabled">#' + esc(i.pr) + " (no URL in the feed)</span>")],
+      ["labels", esc((i.labels || []).join(", ") || "—")],
+      // orch#163: this axis is now BUILT (the repo-level default in
+      // sectionHead/repo-row comments elsewhere is the one still not
+      // built). Read i.auto_land alone -- never i.labels -- and reuse the
+      // exact same dot+data-act control the list rows use (autoDot),
+      // so there is one home for "what does tapping this do", not a
+      // second toggle with its own payload that could drift from the
+      // first.
+      ["automerge", autoDot(i, slug) + " " + (i.auto_land ? "on" : "off")],
+      ["issue-orch", dot(i.orch_alive) + (i.orch_alive ? " alive" : " dead") +
+        " · " + (i.prior_runs || 0) + " prior runs" +
+        (i.contended ? ' <span class="s BLOCKED">contended</span>' : "")]
+    ];
+    if (i.brief && i.brief.text) {
+      // The issue-orch's own qualitative line, read from its journal by the
+      // tick. The page RENDERS it and computes nothing: a brief assembled
+      // here would be a second derivation that can disagree with the feed's.
+      // Absent brief renders nothing at all -- an issue whose first wake has
+      // not finished gets an honest blank, never an invented sentence.
+      pairs.push(["brief", esc(i.brief.text) +
+        (i.brief.stale ? ' <span class="s CHECKING">stale</span>' : "")]);
+    }
+    out += defList(pairs);
+
+    // 4. ACTIONS -- the verbs grouped in ONE place, secondary, plus the
+    // resume command as a furniture code line. Verb output renders INLINE
+    // here (the global #out pre is cut, section 7).
+    var sink = idsafe(slug) + num;
+    out += sectionHead("actions", null, "", "primary");
+    // The blocking findings, ABOVE the verbs they disable (#117). A greyed
+    // merge button whose only explanation is a title attribute is no
+    // explanation at all -- titles do not exist on touch, which is the
+    // design's primary target (section 3). Rendered from the same
+    // blockingFindings() the button's disabled test reads, so the list and
+    // the greying can never disagree. Absent when nothing blocks: the common
+    // state gets no banner, same rule as the condition line above.
+    var blockers = blockingFindings(d, slug, i.issue);
+    if (blockers.length) {
+      out += furniture(esc(MERGE_BLOCKED), "cond");
+      out += '<div class="note">' + blockers.map(function (it) {
+        return esc(String(it.n) + ". " + (it.location || "?") + " — " + (it.finding || ""));
+      }).join("\n") + "</div>";
+    }
+    out += '<div class="verbs" style="flex-wrap:wrap">' +
+      verbMerge(d, slug, i) +
+      verbLink(i.url, "issue", "this issue has no URL in the feed") + "</div>";
+    // The resume line, for a local operator who will not wait for the tick's
+    // own recovery. Terminal friction is RIGHT for overriding the system's
+    // launcher (section 4.1): dead rows deliberately carry no start button.
+    var resume = (i.sessions || []).filter(function (s) { return s.resume; })[0];
+    out += furniture(resume
+      ? "resume by hand: " + esc(resume.resume)
+      : "resume by hand: no session on record to resume", "code");
+    out += '<pre class="out" id="o' + esc(sink) + '"></pre>';
+
+    // 5. SESSIONS -- entity rows with tail. A run log is what the process
+    // did; a transcript is what it said. DESIGN names them as different
+    // questions -- tail is per-session (s.file), so it stays in this loop;
+    // log is "all runs of this key" (issue-scoped, not session-scoped), so
+    // it moved to its own RUN LOG section below (block 6) rather than
+    // repeating an identical repo/issue request once per session row.
+    var sessions = i.sessions || [];
+    out += sectionHead("sessions", sessions.length, "", "primary");
+    if (!sessions.length) out += furniture("no sessions on record for this issue", "hint");
+    sessions.forEach(function (s) {
+      out += entityRow({
+        mark: dot(s.live, s.live ? " pulse" : ""),
+        id: '<span class="k2">' + esc(s.id) + "</span>",
+        what: esc(s.turns + " turns · idle " + secs(s.idle_sec) + (s.current ? " · current" : "")),
+        age: "",
+        verbs: verbTail(s.file, sink, s.id)
+      });
+      // An empty worker list and a walk that RAISED must not render the same.
+      // Silence here reads as "this session spawned nothing", and an operator
+      // acts on that -- it is the input to the long-running-lease kill. So
+      // say so, not silence (#66). See STATES.md finding 10: enforcing the
+      // unknown at the derivation is only half the fix if no consumer
+      // renders it.
+      var ws = s.workers || [];
+      if (s.workers_unreadable) {
+        out += '<div class="wks">workers unreadable</div>';
+      } else if (ws.length) {
+        out += '<div class="wks">' + ws.map(function (w) {
+          return esc(w.id) + " · " + (w.turns || 0) + " turns · idle " + esc(secs(w.idle_sec));
+        }).join("<br>") + "</div>";
+      }
+    });
+
+    // 6. RUN LOG -- all runs of this key, not one run (orch#151). SESSIONS
+    // above is scoped to one run at a time ("1 of 3 runs" in the artboard);
+    // this is the whole key's history across every run that ever held it.
+    // A run log is what the process DID; SESSIONS/tail is what it SAID --
+    // the subtitle below is the one line that keeps those legible as
+    // different questions, per the artboard's own wording.
+    //
+    // On-demand, not feed data (docs/UX-REDESIGN.md section 8 classes `log`
+    // as a stage-2 server action): nothing renders here until the button in
+    // the header is clicked, same round-trip shape as tail.
+    out += sectionHead("run log", null,
+      '<span class="m">all runs of this key</span>' + verbLog(slug, i.issue, sink), "primary");
+    out += '<div id="rl' + esc(sink) + '"></div>';
+
+    // The steering footer: the journal is a LABELED STEERING LINK, not an
+    // embed and not a verb. It is GitHub comments (D2); human replies pass
+    // into the next brief unfiltered as steering input (core.journal_tail),
+    // and the phone writes GitHub threads natively. A second write path
+    // through /act would duplicate a better surface.
+    out += furniture(i.url
+      ? 'steer this issue: <a href="' + esc(i.url) + '" target="_blank" rel="noopener">comment on the thread ↗</a>'
+      : "steer this issue: no thread URL in the feed", "hint");
+    return out;
+  }
+
+  function render(d) {
+    // Remembered so the /act probe can repaint off-origin, where poll() is a
+    // no-op and there is no second source of data to re-render from (#66).
+    last_data = d;
+    armed = null;
+    generated_at = d.generated || null;
+    // The threshold the tick actually uses, not a client-side copy of it.
+    NUDGE_IDLE_MINS = typeof d.nudge_idle_mins === "number" ? d.nudge_idle_mins : null;
+
+    var rt = route();
+    var out = rt.page === "repo" ? repoPage(d, rt.slug)
+            : rt.page === "issue" ? issuePage(d, rt.slug, rt.issue)
+            : machinePage(d);
+    // Unconditional, always. The gate that once shipped was not spelled
+    // CAN_ACT at all: render() built every control into `out` and then threw
+    // the whole string away when a state test said the queue was empty --
+    // which removed the only controls that could recover the page. An
+    // empty-state NOTE is fine and wanted; it is APPENDED inside the page
+    // builders above, never substituted for the page (#66).
+    $("body").innerHTML = out;
+
+    // The visible readout of why the controls are dead. ACT_REASON names the
+    // actual failure when the probe recorded one; the older origin-flavoured
+    // wording stays as the fallback for when it has not spoken yet (#66).
+    // When the page is not same-origin, FEED_REASON names BOTH origins: the
+    // old wording here ("rebuilt each tick") described a healthy sandbox and
+    // read as reassurance on a page whose feed address was simply wrong (#82).
+    $("ro").textContent = CAN_ACT
+      ? ""
+      : (ACT_REASON ? ACT_REASON
+                    : (SAME_ORIGIN ? "no /act endpoint — viewer only"
+                                   : FEED_REASON));
+    paintAge();
+    wire();
+  }
+
+  // Relative age plus the absolute moment the data describes, so a page left
+  // open cannot keep claiming "just now". Reads the stored stamp only.
+  function paintAge() {
+    var el = $("age");
+    if (!el) return;
+    var gen = generated_at ? new Date(generated_at) : null;
+    if (!gen || isNaN(gen)) { el.textContent = ""; return; }
+    var s = Math.max(0, Math.round((Date.now() - gen.getTime()) / 1000));
+    el.textContent = (s < 5 ? "just now" : secs(s) + " ago") + " · " + clock(generated_at);
+  }
+
+  function wire() {
+    document.querySelectorAll("[data-t]").forEach(function (el) {
+      el.onclick = function (e) {
+        if (e.target.tagName === "A" || e.target.tagName === "BUTTON") return;
+        var id = el.getAttribute("data-t"), dd = $(id);
+        if (dd) {
+          // Flip off the DOM's OWN current class, not open[id]'s truthiness:
+          // "dun" (other sessions) defaults CLOSED (open[id] undefined =
+          // falsy = closed), but a repo fold id (#160) defaults OPEN
+          // (open[id] undefined = expanded, per the FOLD_KEY seed above) --
+          // two different meanings for "undefined" on the same shared map.
+          // The rendered className is the one ground truth both agree on.
+          var nowOpen = dd.className.indexOf(" on") === -1;
+          open[id] = nowOpen;
+          dd.className = "det" + (nowOpen ? " on" : "");
+          // Persist ONLY repo fold ids (foldId()'s "rp-" prefix, #160). The
+          // delimiting hyphen matters: a bare "rp" prefix would also match
+          // some future unrelated toggle id like "rpt" or "rpanel" and
+          // silently persist it into the repo-fold store, so the test below
+          // checks for the full "rp-" prefix, not just "rp". "other
+          // sessions" (id "dun") stays unpersisted -- it is reference, and
+          // its current behaviour (resets to collapsed on reload) must not
+          // change. The store records what is FOLDED (see FOLD_KEY above),
+          // so an open repo is a deleted key, not a `false` value -- keeping
+          // the store's only content the exceptions to the expanded default.
+          if (id.indexOf("rp-") === 0) {
+            var folded = foldedSet();
+            if (nowOpen) { delete folded[id]; } else { folded[id] = true; }
+            foldSave(folded);
+          }
+        }
+      };
+    });
+    document.querySelectorAll("[data-act]").forEach(function (b) {
+      // A [data-act] button that also carries data-confirm arms on the first
+      // click and fires on the second, exactly like [data-unwatch]/[data-merge].
+      // Without the attribute it stays the plain one-click path it always was.
+      var sink = b.getAttribute("data-sink") || null;
+      if (b.hasAttribute("data-confirm")) {
+        b.onclick = function (e) {
+          e.stopPropagation();
+          if (armed === b) {
+            disarm();
+            try { act(JSON.parse(b.getAttribute("data-act")), b, sink); } catch (err) {}
+            return;
+          }
+          disarm();
+          armed = b;
+          b.className = "danger armed";
+          btnSay(b, b.getAttribute("data-confirm"));
+        };
+        return;
+      }
+      // data-no-btn (autoDot, orch#163): this control has no text to
+      // replace -- pass null so act() skips the textContent writes it
+      // otherwise makes on btn ("…", then "done"/"failed", or "?" on a
+      // failed fetch), which would spill out of the dot's 7px box.
+      var actBtn = b.hasAttribute("data-no-btn") ? null : b;
+      b.onclick = function (e) {
+        e.stopPropagation();
+        try { act(JSON.parse(b.getAttribute("data-act")), actBtn, sink); } catch (err) {}
+      };
+    });
+    document.querySelectorAll("[data-merge]").forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        if (armed === b) {
+          disarm();
+          try { act(JSON.parse(b.getAttribute("data-merge")), b); } catch (err) {}
+          return;
+        }
+        disarm();
+        armed = b;
+        b.className = "danger armed";
+        btnSay(b, b.getAttribute("data-confirm"));
+      };
+    });
+    document.querySelectorAll("[data-unwatch]").forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        if (armed === b) {
+          disarm();
+          try { act(JSON.parse(b.getAttribute("data-unwatch")), b); } catch (err) {}
+          return;
+        }
+        disarm();
+        armed = b;
+        b.className = "danger armed";
+        btnSay(b, b.getAttribute("data-confirm"));
+      };
+    });
+    // run log (orch#151): plain single-click like [data-tail] via [data-act]
+    // -- log is a read, not a destructive verb, so no arm-then-confirm.
+    // Wired by hand (not through the generic [data-act] delegated handler
+    // above) because that handler discards act()'s resolved value; this
+    // needs the decoded body to render structured rows, so it chains its
+    // own .then() onto the promise act() returns, exactly the use act()'s
+    // own comment (~601) names.
+    document.querySelectorAll("[data-run-log]").forEach(function (b) {
+      var sink = b.getAttribute("data-sink");
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var body; try { body = JSON.parse(b.getAttribute("data-run-log")); } catch (err) { return; }
+        act(body, b, null).then(function (d) {
+          if (!d || !sink) return;
+          run_log_text[sink] = runLogBody(d.runs || []);
+          paintRunLog(sink);
+        });
+      };
+    });
+    // The generic text-and-send handler: plain single click like [data-act],
+    // no arm-then-confirm -- these posts are additive (a comment, a note), not
+    // destructive, so they do not need the friction unwatch/merge get.
+    // Reads the sibling input's value at click time (the whole reason this is
+    // not a plain [data-act] button) and clears the box on a successful post
+    // so a second send does not resend the first by accident.
+    //
+    // It arrived with the reply box (#224) but is NOT that box's private
+    // handler: it dispatches on whatever `action` the payload names, so any
+    // control that wants "read the sibling input, post it, clear on success"
+    // rides it. #292's per-repo leave-note box does exactly that (action
+    // "ask"). #291 removed the QUESTIONS section and with it `replyBox`, the
+    // handler's original emitter -- the handler itself stays, because the note
+    // box is a live emitter on main and deleting this would silently turn that
+    // box into an input and a button that post nothing.
+    document.querySelectorAll("[data-reply]").forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var body; try { body = JSON.parse(b.getAttribute("data-reply")); } catch (err) { return; }
+        var inputEl = $(body.input);
+        var text = inputEl ? inputEl.value.trim() : "";
+        if (!text) return;
+        delete body.input;
+        body.text = text;
+        act(body, b, null).then(function (r) {
+          if (r && r.ok && inputEl) inputEl.value = "";
+        });
+      };
+    });
+    // The reload button is rebuilt by every render (it lives in each page's
+    // nav bar), so it is rewired here rather than once at load. It reloads
+    // the PAGE - it is not a feed poll. That distinction is the whole point:
+    // a page reload also picks up a new build of the page's own code, which a
+    // feed fetch never does, and a stale served page has been a real failure
+    // mode twice (#76). It therefore takes no origin check and is never
+    // disabled: reloading is always possible, off-origin included (#83,
+    // restoring the verdict of #36). The control stays visible for the reason
+    // recorded in #66 - a hidden control cannot be told apart from one that
+    // was never built.
+    var reloadBtn = $("btn-reload");
+    if (reloadBtn) { reloadBtn.onclick = function () { location.reload(); }; }
+    // Restore every disclosure and every inline output box the last render
+    // had open -- render() rebuilds the page from a string, so both would
+    // otherwise be wiped by the poll act() schedules 1.2s after any action.
+    Object.keys(open).forEach(function (id) {
+      var dd = $(id); if (dd && open[id]) dd.className = "det on";
+    });
+    Object.keys(out_text).forEach(paintOut);
+    Object.keys(run_log_text).forEach(paintRunLog);
+  }
+
+  function disarm() {
+    if (!armed) return;
+    armed.className = "danger";
+    btnRestore(armed);
+    armed = null;
+  }
+  document.addEventListener("click", disarm);
+
+  // Same-origin only. In openclaw the page is sandboxed to origin `null`, and
+  // the feed sends no CORS headers, so a fetch there fails no matter what the
+  // CSP allows - and it does not need to, because the tick bakes the data in.
+  // FEED is resolved AGAINST window.location, which is what lets it be
+  // relative: `new URL(FEED)` alone throws on a relative path, and the catch
+  // below would swallow that into a permanently-false SAME_ORIGIN - the exact
+  // silent failure this is meant to end.
+  var FEED_ORIGIN = (function () {
+    try { return new URL(FEED, window.location.href).origin; }
+    catch (e) { return null; }
+  })();
+  var SAME_ORIGIN = FEED_ORIGIN !== null && FEED_ORIGIN === window.location.origin;
+  // Say WHY, with both origins named. A mismatch used to disable the update
+  // path in silence, which is how a wrong port survived long enough to be
+  // mistaken for three other bugs (#82). A wrong feed address must now be
+  // readable on the page, not inferred from data that stopped moving.
+  var FEED_REASON = SAME_ORIGIN ? "" : (FEED_ORIGIN === null
+    ? "cannot resolve the feed address " + FEED + " against this page"
+    : "feed origin " + FEED_ORIGIN + " does not match page origin "
+      + window.location.origin + " — the page cannot fetch updates");
+  if (!SAME_ORIGIN && window.console && console.warn) {
+    console.warn("orch widget: " + FEED_REASON);
+  }
+
+  function poll() {
+    if (!SAME_ORIGIN) return Promise.resolve();
+    return fetch(FEED, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () {});
+  }
+
+  // Deep links must survive reload AND back/forward. A hash change is a pure
+  // client-side navigation: repaint from the data already held, never refetch
+  // -- the tick is the origin of new data, and a route change is not news.
+  window.addEventListener("hashchange", function () {
+    if (last_data) render(last_data);
+  });
+
+  // Recomputes the #age text from the stored stamp. This fetches NOTHING -
+  // it is a clock, not a poll. There is deliberately no feed timer here.
+  setInterval(paintAge, 10000);
+
+  if (SEED) { try { render(SEED); } catch (e) {} }
+  // One fetch on load, then nothing on a timer: a page-side refresh cadence
+  // would compete with the tick's own. The tick is the origin; the reload
+  // button is how the operator asks for fresh data. Do not add setInterval.
+  if (SAME_ORIGIN) { poll(); }
+
+  // /events pushes the same whole-feed object poll() fetches, on every feed
+  // change, so the page repaints as the tick writes rather than waiting on
+  // a refresh. This is the live path the "do not add setInterval" rule above
+  // was steering toward: a push stream, not a poll cadence. The rule still
+  // stands - the load-time poll() above is unchanged and is the fallback for
+  // browsers with no EventSource and for the up-to-first-connect gap. Drops
+  // are the browser's problem to reconnect; adding retry or a fallback timer
+  // here would just be the forbidden poll loop wearing a disguise.
+  if (SAME_ORIGIN && typeof EventSource !== "undefined") {
+    var es = new EventSource("/events");
+    es.onmessage = function (e) {
+      try { render(JSON.parse(e.data)); } catch (err) {}
+    };
+  }
+})();
+</script>
+</body>
+</html>

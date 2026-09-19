@@ -1,0 +1,56 @@
+#!/bin/bash
+# Rebuild the widget and restart the service after code arrives via merge/pull.
+#
+# Fires on `git merge` and `git pull`. Not on `git checkout` (post-checkout)
+# and not on a fetch alone -- nothing has changed yet then.
+#
+# ORCH_HOME is pinned deliberately: build_widget writes public/widget.html
+# relative to it, and an unpinned build from a worktree overwrites the live
+# checkout (issue #57).
+set -u
+ORCH_HOME="$(git rev-parse --show-toplevel)"
+export ORCH_HOME
+
+# A restart on a failed build would serve a half-written page, so the build
+# gates the restart. Never reorder these.
+if ! (cd "$ORCH_HOME" && python3 -m orch.build_widget); then
+    echo "post-merge: widget build FAILED -- not restarting" >&2
+    exit 1
+fi
+
+# Restart only the live checkout's service. A worktree merge must never
+# restart the machine's server -- same class of mistake as the build above.
+if [ "$ORCH_HOME" != "$HOME/orch" ]; then
+    echo "post-merge: rebuilt widget (no restart: worktree, not the live checkout)"
+    exit 0
+fi
+
+# Restart each enabled unit, and only the enabled ones. orch-tick is the
+# scan/spawn loop and is deliberately stoppable on its own (that is the whole
+# point of it being a separate service -- stopping token spend without losing
+# the dashboard), so a disabled orch-tick is a normal state, not a fault: new
+# code must never restart a unit the operator switched off.
+restarted=""
+skipped=""
+failed=""
+for unit in orch-web orch-tick; do
+    if ! systemctl --user is-enabled "$unit.service" >/dev/null 2>&1; then
+        skipped="$skipped $unit"
+        continue
+    fi
+    if systemctl --user restart "$unit.service"; then
+        restarted="$restarted $unit"
+    else
+        failed="$failed $unit"
+    fi
+done
+
+msg="post-merge: rebuilt widget"
+[ -n "$restarted" ] && msg="$msg, restarted$restarted"
+[ -n "$skipped" ] && msg="$msg (not enabled:$skipped)"
+
+if [ -n "$failed" ]; then
+    echo "$msg, RESTART FAILED:$failed" >&2
+    exit 1
+fi
+echo "$msg"

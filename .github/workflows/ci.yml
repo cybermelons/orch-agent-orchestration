@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run test suite
+        run: python3 -m orch.test_core
+
+      # build_widget bakes public/status.json into the widget, so it needs a
+      # seed to read. status.json is runtime output written by the running
+      # orchestrator; a fresh clone never has one, and without this the step
+      # exits 1 with "cannot read .../public/status.json" on every run.
+      # An empty object is enough to exercise what this step is here to
+      # catch: a template missing __SEED__, and a widget over the size cap.
+      - name: Build widget
+        env:
+          ORCH_HOME: ${{ github.workspace }}
+        run: |
+          mkdir -p public
+          [ -f public/status.json ] || printf '{}' > public/status.json
+          python3 -m orch.build_widget
+
+      - name: Syntax-check widget template JS
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+          src = open("widget.tpl.html", encoding="utf-8").read()
+          m = re.search(r"<script(?:\s[^>]*)?>(.*?)</script>", src, re.DOTALL)
+          if not m:
+              print("NO SCRIPT BLOCK FOUND IN widget.tpl.html", file=sys.stderr)
+              sys.exit(1)
+          with open("_widget_check.js", "w", encoding="utf-8") as f:
+              f.write(m.group(1))
+          EOF
+          node --check _widget_check.js
+          rm -f _widget_check.js

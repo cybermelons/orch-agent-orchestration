@@ -1,0 +1,26 @@
+# EXAMPLE. Copy this to repos.txt, which is machine-local and deliberately
+# untracked (orch#250 — a tracked repos.txt dirtied the tree on every edit,
+# and the auto-pull dirty guard then refused forever).
+#
+# Repos the tracker watches. One path per line, ~ expanded.
+# The issue layer picks its backend per repo from the checkout's own `origin`
+# remote host: a github.com remote uses gh, any other host uses tea. A GitHub
+# remote is NOT required.
+#
+# Optional second token: `login=<profile>` names the tea login profile (see
+# `tea logins`) to use for that repo. Only read for a tea-backed repo; a
+# gh-backed repo ignores it. Defaults to "gitea" when absent.
+#
+#   ~/Documents/GitHub/orch
+#   ~/Documents/GitHub/gita-lectures  login=gitea
+#
+# `#scan=<path>` names a directory whose immediate subdirectories are offered
+# as candidates in the dashboard's watch picker (the "+ watch repo" control),
+# so the operator can pick a repo from a list instead of typing an exact path
+# from memory. It is a comment, not a real repo line, on purpose: every
+# existing reader here already skips a `#`-prefixed line, and a bare
+# `scan=<path>` line would be misread as a repo checkout at that literal path
+# by _parse_repos_line, whose first token is unconditionally a path.
+
+# ~/Documents/GitHub/example-repo
+# ~/Documents/GitHub/example-tea-repo  login=gitea

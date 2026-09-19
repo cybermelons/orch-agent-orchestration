@@ -1,0 +1,18 @@
+[Unit]
+Description=orch ticker (the scan/spawn loop)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m orch.ticker
+WorkingDirectory=%h/orch
+Environment=ORCH_HOME=%h/orch
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=3
+# The ticker spawns worker sessions and backgrounds them. A control-group kill
+# on stop would take those workers down with it; they must outlive a restart of
+# the scheduler that started them.
+KillMode=process
+
+[Install]
+WantedBy=default.target

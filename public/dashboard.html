@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orch Dashboard</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --red:#f85149; --amber:#d29922; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:16px;
+  }
+  header {
+    display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+    border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:16px;
+  }
+  h1 { font-size:18px; margin:0; letter-spacing:.3px; }
+  .host { color:var(--muted); font:12px/1.4 var(--mono); display:flex; gap:14px; flex-wrap:wrap; }
+  .host b { color:var(--text); font-weight:600; }
+  #status { margin-left:auto; font:12px var(--mono); color:var(--muted); }
+  #status.err { color:var(--red); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--green); margin-right:5px; vertical-align:middle; }
+  .dot.stale { background:var(--amber); }
+  .dot.dead { background:var(--red); }
+
+  .alerts { margin-bottom:16px; display:flex; flex-direction:column; gap:6px; }
+  .alert { padding:8px 12px; border-radius:6px; font-size:13px; border-left:3px solid; }
+  .alert.error { background:rgba(248,81,73,.1); border-color:var(--red); }
+  .alert.warn  { background:rgba(210,153,34,.1); border-color:var(--amber); }
+  .alert.info  { background:rgba(88,166,255,.1); border-color:var(--accent); }
+
+  .repo { background:var(--panel); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; overflow:hidden; }
+  .repo > summary {
+    list-style:none; cursor:pointer; padding:12px 14px; display:flex; align-items:center; gap:10px;
+    font-weight:600;
+  }
+  .repo > summary::-webkit-details-marker { display:none; }
+  .repo > summary .caret { color:var(--muted); transition:transform .15s; }
+  .repo[open] > summary .caret { transform:rotate(90deg); }
+  .repo-slug { color:var(--accent); }
+  /* orch#116: this is the one field that answers "which copy is this?" --
+     repos.txt is machine-local, so a slug can map to several working trees.
+     user-select:all because reaching a repo means pasting the path into a
+     shell; the summary row is a click target, so the span also stops the
+     click from toggling the <details> open while text is being selected. */
+  .repo-path { color:var(--muted); font:11px var(--mono); user-select:all; }
+  .badge { font:11px var(--mono); padding:1px 7px; border-radius:10px; background:var(--panel2); color:var(--muted); border:1px solid var(--border); }
+  .badge.live { color:var(--green); border-color:var(--green); }
+  .push { margin-left:auto; }
+
+  .issues { padding:0 14px 12px; }
+  .issue { background:var(--panel2); border:1px solid var(--border); border-radius:6px; margin-top:10px; }
+  .issue.contended { border-color:var(--red); box-shadow:0 0 0 1px var(--red) inset; }
+  .issue > summary {
+    list-style:none; cursor:pointer; padding:10px 12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .issue > summary::-webkit-details-marker { display:none; }
+  .issue .caret { color:var(--muted); transition:transform .15s; }
+  .issue[open] > summary .caret { transform:rotate(90deg); }
+  .inum { font:12px var(--mono); color:var(--muted); }
+  .ititle { font-weight:500; }
+  .state { font:11px var(--mono); text-transform:uppercase; padding:1px 6px; border-radius:4px; background:var(--bg); color:var(--muted); }
+  .contended-flag {
+    font:11px var(--mono); font-weight:700; color:#fff; background:var(--red);
+    padding:1px 8px; border-radius:4px; text-transform:uppercase;
+  }
+  /* orch#228: only rendered for a claim held by ANOTHER host, so it is
+     information the operator cannot get from this machine's own ledger. */
+  .claim-holder { font:11px var(--mono); color:var(--muted); }
+  .imeta { font:11px var(--mono); color:var(--muted); }
+
+  .sessions { padding:4px 12px 12px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font:12px var(--mono); }
+  th { text-align:left; color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td { padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+  .sid { color:var(--accent); }
+  .live-y { color:var(--green); font-weight:600; }
+  .live-n { color:var(--muted); }
+  .resume { display:flex; align-items:center; gap:6px; }
+  .resume code { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:2px 6px; white-space:pre; max-width:420px; overflow:hidden; text-overflow:ellipsis; }
+  .copy { cursor:pointer; background:var(--panel); border:1px solid var(--border); color:var(--muted); border-radius:4px; padding:2px 7px; font:11px var(--mono); }
+  .copy:hover { color:var(--text); border-color:var(--accent); }
+  .empty { color:var(--muted); font-style:italic; padding:10px 12px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Orch Dashboard</h1>
+  <div class="host" id="host"></div>
+  <div id="status"><span class="dot"></span>connecting…</div>
+</header>
+<div class="alerts" id="alerts"></div>
+<div id="repos"></div>
+
+<script>
+const URL = "https://devhost.example-tailnet.ts.net:18802/status.json";
+const REFRESH = 30000;
+
+// Preserve which <details> are open across refreshes.
+function openSet() {
+  const s = new Set();
+  document.querySelectorAll("details[data-key]").forEach(d => { if (d.open) s.add(d.dataset.key); });
+  return s;
+}
+
+function fmtIdleSec(s) {
+  if (s == null || s < 0) return "—";
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s/60) + "m " + (s%60) + "s";
+  if (s < 86400) return Math.floor(s/3600) + "h " + Math.floor((s%3600)/60) + "m";
+  return Math.floor(s/86400) + "d " + Math.floor((s%86400)/3600) + "h";
+}
+// A negative commit count is the feed saying it could not READ the count --
+// it is not a real zero. Zero commits is a conclusion an operator acts on
+// ("the agent produced nothing"), so never render a failed read as one.
+// Same convention as fmtIdleMin's -1. See STATES.md finding 10.
+function fmtCommits(c) {
+  if (c == null || c < 0) return "—";
+  return c;
+}
+function fmtIdleMin(m) {
+  if (m == null || m < 0) return "—";
+  if (m < 60) return m + "m";
+  return Math.floor(m/60) + "h " + (m%60) + "m";
+}
+// "claimed on devhost, 12m left" (orch#228). Absent for a local claim: the
+// dashboard runs on the holder's own machine in that case, so naming it adds
+// nothing, and the row stays legible for the common case. A lapsed lease
+// renders "Nm ago" instead of a negative count.
+function fmtClaimHolder(h) {
+  if (!h || h.local) return "";
+  const m = h.mins_left;
+  const when = (m == null) ? "" :
+    (m >= 0 ? ", " + fmtIdleMin(m) + " left" : ", lapsed " + fmtIdleMin(-m) + " ago");
+  return `<span class="claim-holder" title="lease until ${esc(h.until)}">`
+       + `claimed on ${esc(h.host)}${esc(when)}</span>`;
+}
+function esc(x) {
+  return String(x == null ? "" : x).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Millions with one decimal (322355913 -> "322.4M"); null/undefined -> "?",
+// same "no record, never zero" contract as spend_window() itself.
+function fmtSpend(n) {
+  if (n == null) return "?";
+  return (n / 1e6).toFixed(1) + "M";
+}
+
+function sessionRows(sessions) {
+  if (!sessions || !sessions.length)
+    return '<tr><td colspan="6" class="empty">no sessions</td></tr>';
+  return sessions.map(s => {
+    const live = s.live
+      ? '<span class="live-y">● live</span>'
+      : '<span class="live-n">○ ' + (s.current ? 'idle' : 'past') + '</span>';
+    const resume = esc(s.resume || "");
+    return `<tr>
+      <td class="sid">${esc(s.id)}</td>
+      <td>${esc(s.turns)}</td>
+      <td>${fmtIdleSec(s.idle_sec)}</td>
+      <td>${live}</td>
+      <td class="resume">
+        <code>${resume}</code>
+        <button class="copy" data-copy="${resume}">copy</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function issueBlock(repoKey, iss) {
+  const contended = iss.worker && iss.worker.contended;
+  const key = repoKey + "#" + iss.issue;
+  const flag = contended ? '<span class="contended-flag">contended</span>' : '';
+  const liveCount = (iss.sessions || []).filter(s => s.live).length;
+  return `<details class="issue${contended ? ' contended' : ''}" data-key="${esc(key)}">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="inum">#${esc(iss.issue)}</span>
+      <span class="ititle">${esc(iss.title || '(untitled)')}</span>
+      <span class="state">${esc(iss.state || '?')}</span>
+      ${flag}${fmtClaimHolder(iss.claim_holder)}
+      <span class="imeta push">${liveCount} live · ${(iss.sessions||[]).length} sess · ${esc(fmtCommits(iss.commits))} commits · idle ${fmtIdleMin(iss.idle_min)}</span>
+    </summary>
+    <div class="sessions">
+      <table>
+        <thead><tr><th>id</th><th>turns</th><th>idle</th><th>live</th><th>resume</th></tr></thead>
+        <tbody>${sessionRows(iss.sessions)}</tbody>
+      </table>
+    </div>
+  </details>`;
+}
+
+function repoBlock(repo) {
+  const key = repo.slug || repo.repo;
+  const issues = repo.issues || [];
+  const contendedN = issues.filter(i => i.worker && i.worker.contended).length;
+  const body = issues.length
+    ? issues.map(i => issueBlock(key, i)).join("")
+    : '<div class="empty">no tracked issues</div>';
+  const liveBadge = repo.live_workers > 0
+    ? `<span class="badge live">${repo.live_workers} live</span>` : '';
+  const contBadge = contendedN
+    ? `<span class="contended-flag">${contendedN} contended</span>` : '';
+  return `<details class="repo" data-key="${esc(key)}" ${repo.ok===false?'':'open'}>
+    <summary>
+      <span class="caret">▶</span>
+      <span class="repo-slug">${esc(key)}</span>
+      <span class="repo-path" title="checkout path on this machine"
+            onclick="event.preventDefault();event.stopPropagation();">${esc(repo.path||'')}</span>
+      ${repo.ok===false?'<span class="contended-flag">gh read failed</span>':''}
+      <span class="push"></span>
+      ${contBadge}${liveBadge}
+      <span class="badge">${issues.length} issues</span>
+    </summary>
+    <div class="issues">${body}</div>
+  </details>`;
+}
+
+function renderAlerts(alerts) {
+  const el = document.getElementById("alerts");
+  if (!alerts || !alerts.length) { el.innerHTML = ""; return; }
+  el.innerHTML = alerts.map(a => {
+    const lvl = a.level === "error" ? "error" : a.level === "warn" ? "warn" : "info";
+    return `<div class="alert ${lvl}">${esc(a.msg)}</div>`;
+  }).join("");
+}
+
+function renderHost(d) {
+  const h = d.host || {}, t = d.timer || {};
+  const gw = h.openclaw_gateway === "active"
+    ? '<b style="color:var(--green)">active</b>' : `<b style="color:var(--red)">${esc(h.openclaw_gateway||'?')}</b>`;
+  document.getElementById("host").innerHTML = `
+    <span>gateway ${gw}</span>
+    <span>workers <b>${esc(h.live_workers||0)}</b></span>
+    <span>load <b>${esc(h.load||'?')}</b></span>
+    <span>disk <b>${esc(h.disk||'?')}</b></span>
+    <span title="weighted Claude Code tokens spent machine-wide over the trailing window (input+output+cache, not dollars, not raw tokens)">spend <b>${fmtSpend(h.spend && h.spend.total)}</b></span>
+    <span>tick <b>${esc(t.timer||'?')}</b> · ${esc(t.minutes_since_last)}m ago</span>`;
+}
+
+async function refresh() {
+  const st = document.getElementById("status");
+  const open = openSet();
+  try {
+    const r = await fetch(URL + "?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    renderHost(d);
+    renderAlerts(d.alerts);
+    document.getElementById("repos").innerHTML = (d.repos || []).map(repoBlock).join("");
+    // restore open state
+    document.querySelectorAll("details[data-key]").forEach(el => {
+      if (open.size && !open.has(el.dataset.key) && el.classList.contains("issue")) el.open = false;
+      if (open.has(el.dataset.key)) el.open = true;
+    });
+    const when = new Date().toLocaleTimeString();
+    st.className = "";
+    st.innerHTML = `<span class="dot"></span>updated ${when}`;
+  } catch (e) {
+    st.className = "err";
+    st.innerHTML = `<span class="dot dead"></span>fetch failed: ${esc(e.message)} · ${new Date().toLocaleTimeString()}`;
+  }
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest(".copy");
+  if (!b) return;
+  e.preventDefault();
+  navigator.clipboard.writeText(b.dataset.copy).then(() => {
+    const t = b.textContent; b.textContent = "copied"; setTimeout(() => b.textContent = t, 1000);
+  });
+});
+
+refresh();
+setInterval(refresh, REFRESH);
+</script>
+</body>
+</html>

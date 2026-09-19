@@ -1,0 +1,12 @@
+# operational state — runtime data, not code
+state/
+history.jsonl
+repos.txt
+*.jsonl
+
+# scratch — one-time scripts and plans
+tmp_*
+
+__pycache__/
+*.pyc
+.venv/
